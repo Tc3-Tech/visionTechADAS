@@ -32,22 +32,47 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 });
 
 function initDatabase() {
-  const createTableQuery = `
+  // Create customers table
+  const createCustomersTable = `
+    CREATE TABLE IF NOT EXISTS customers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_by TEXT
+    )
+  `;
+  
+  // Update vehicles table for VIN/RO and customer relationship
+  const createVehiclesTable = `
     CREATE TABLE IF NOT EXISTS vehicles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      vin TEXT UNIQUE NOT NULL,
+      vin TEXT,
+      repair_order TEXT,
+      customer_id INTEGER NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('pre-scan', 'post-scan', 'calibration', 'completed')),
       notes TEXT,
       date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
       created_by TEXT,
-      updated_by TEXT
+      updated_by TEXT,
+      FOREIGN KEY (customer_id) REFERENCES customers (id),
+      CHECK (vin IS NOT NULL OR repair_order IS NOT NULL),
+      UNIQUE(vin, customer_id),
+      UNIQUE(repair_order, customer_id)
     )
   `;
   
-  db.run(createTableQuery, (err) => {
+  db.run(createCustomersTable, (err) => {
     if (err) {
-      console.error('Error creating table:', err.message);
+      console.error('Error creating customers table:', err.message);
+    } else {
+      console.log('Customers table ready');
+    }
+  });
+  
+  db.run(createVehiclesTable, (err) => {
+    if (err) {
+      console.error('Error creating vehicles table:', err.message);
     } else {
       console.log('Vehicles table ready');
     }
@@ -59,15 +84,122 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Get all vehicles
-app.get('/api/vehicles', (req, res) => {
+// Customer endpoints
+app.get('/api/customers', (req, res) => {
   const query = `
-    SELECT vin, status, notes, date_added, last_updated, created_by, updated_by 
-    FROM vehicles 
-    ORDER BY last_updated DESC
+    SELECT id, name, date_added, created_by 
+    FROM customers 
+    ORDER BY name ASC
   `;
   
   db.all(query, [], (err, rows) => {
+    if (err) {
+      console.error('Error fetching customers:', err.message);
+      res.status(500).json({ error: 'Database error' });
+    } else {
+      res.json(rows);
+    }
+  });
+});
+
+app.post('/api/customers', (req, res) => {
+  const { name, user } = req.body;
+  
+  if (!name || name.trim().length === 0) {
+    return res.status(400).json({ error: 'Customer name is required' });
+  }
+  
+  const cleanName = name.trim();
+  const currentTime = new Date().toISOString();
+  
+  const insertQuery = `
+    INSERT INTO customers (name, date_added, created_by)
+    VALUES (?, ?, ?)
+  `;
+  
+  db.run(insertQuery, [cleanName, currentTime, user || 'unknown'], function(err) {
+    if (err) {
+      if (err.message.includes('UNIQUE constraint failed')) {
+        res.status(409).json({ error: 'Customer already exists' });
+      } else {
+        console.error('Error inserting customer:', err.message);
+        res.status(500).json({ error: 'Database error' });
+      }
+    } else {
+      res.status(201).json({ 
+        id: this.lastID,
+        name: cleanName,
+        message: 'Customer added successfully'
+      });
+    }
+  });
+});
+
+app.delete('/api/customers/:id', (req, res) => {
+  const customerId = req.params.id;
+  
+  // Check if customer has vehicles
+  db.get('SELECT COUNT(*) as count FROM vehicles WHERE customer_id = ?', [customerId], (err, row) => {
+    if (err) {
+      console.error('Error checking customer vehicles:', err.message);
+      return res.status(500).json({ error: 'Database error' });
+    }
+    
+    if (row.count > 0) {
+      return res.status(400).json({ error: 'Cannot delete customer with existing vehicles' });
+    }
+    
+    // Delete customer
+    db.run('DELETE FROM customers WHERE id = ?', [customerId], function(err) {
+      if (err) {
+        console.error('Error deleting customer:', err.message);
+        res.status(500).json({ error: 'Database error' });
+      } else if (this.changes === 0) {
+        res.status(404).json({ error: 'Customer not found' });
+      } else {
+        res.json({ message: 'Customer deleted successfully' });
+      }
+    });
+  });
+});
+
+// Get all vehicles with customer info
+app.get('/api/vehicles', (req, res) => {
+  const { customer_id, date_start, date_end } = req.query;
+  
+  let query = `
+    SELECT v.id, v.vin, v.repair_order, v.status, v.notes, 
+           v.date_added, v.last_updated, v.created_by, v.updated_by,
+           c.name as customer_name, c.id as customer_id
+    FROM vehicles v
+    JOIN customers c ON v.customer_id = c.id
+  `;
+  
+  const params = [];
+  const conditions = [];
+  
+  if (customer_id) {
+    conditions.push('v.customer_id = ?');
+    params.push(customer_id);
+  }
+  
+  if (date_start) {
+    conditions.push('DATE(v.date_added) >= DATE(?)');
+    params.push(date_start);
+  }
+  
+  if (date_end) {
+    conditions.push('DATE(v.date_added) <= DATE(?)');
+    params.push(date_end);
+  }
+  
+  if (conditions.length > 0) {
+    query += ' WHERE ' + conditions.join(' AND ');
+  }
+  
+  query += ' ORDER BY v.last_updated DESC';
+  
+  db.all(query, params, (err, rows) => {
     if (err) {
       console.error('Error fetching vehicles:', err.message);
       res.status(500).json({ error: 'Database error' });
@@ -77,17 +209,45 @@ app.get('/api/vehicles', (req, res) => {
   });
 });
 
-// Get specific vehicle by VIN
-app.get('/api/vehicles/:vin', (req, res) => {
-  const vin = req.params.vin.toUpperCase();
+// Search vehicle by VIN or RO
+app.get('/api/vehicles/search/:identifier', (req, res) => {
+  const identifier = req.params.identifier.toUpperCase();
   
   const query = `
-    SELECT vin, status, notes, date_added, last_updated, created_by, updated_by 
-    FROM vehicles 
-    WHERE vin = ?
+    SELECT v.id, v.vin, v.repair_order, v.status, v.notes, 
+           v.date_added, v.last_updated, v.created_by, v.updated_by,
+           c.name as customer_name, c.id as customer_id
+    FROM vehicles v
+    JOIN customers c ON v.customer_id = c.id
+    WHERE UPPER(v.vin) = ? OR UPPER(v.repair_order) = ?
   `;
   
-  db.get(query, [vin], (err, row) => {
+  db.get(query, [identifier, identifier], (err, row) => {
+    if (err) {
+      console.error('Error fetching vehicle:', err.message);
+      res.status(500).json({ error: 'Database error' });
+    } else if (row) {
+      res.json(row);
+    } else {
+      res.status(404).json({ error: 'Vehicle not found' });
+    }
+  });
+});
+
+// Get specific vehicle by ID
+app.get('/api/vehicles/id/:id', (req, res) => {
+  const vehicleId = req.params.id;
+  
+  const query = `
+    SELECT v.id, v.vin, v.repair_order, v.status, v.notes, 
+           v.date_added, v.last_updated, v.created_by, v.updated_by,
+           c.name as customer_name, c.id as customer_id
+    FROM vehicles v
+    JOIN customers c ON v.customer_id = c.id
+    WHERE v.id = ?
+  `;
+  
+  db.get(query, [vehicleId], (err, row) => {
     if (err) {
       console.error('Error fetching vehicle:', err.message);
       res.status(500).json({ error: 'Database error' });
@@ -101,22 +261,39 @@ app.get('/api/vehicles/:vin', (req, res) => {
 
 // Add or update vehicle
 app.post('/api/vehicles', (req, res) => {
-  const { vin, status, notes, user } = req.body;
+  const { vin, repair_order, customer_id, status, notes, user } = req.body;
   
   // Validation
-  if (!vin || vin.length !== 17) {
+  if (!vin && !repair_order) {
+    return res.status(400).json({ error: 'Either VIN or Repair Order is required' });
+  }
+  
+  if (vin && vin.length !== 17) {
     return res.status(400).json({ error: 'VIN must be exactly 17 characters' });
+  }
+  
+  if (!customer_id) {
+    return res.status(400).json({ error: 'Customer is required' });
   }
   
   if (!['pre-scan', 'post-scan', 'calibration', 'completed'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
   
-  const cleanVin = vin.toUpperCase();
+  const cleanVin = vin ? vin.toUpperCase() : null;
+  const cleanRO = repair_order ? repair_order.trim() : null;
   const currentTime = new Date().toISOString();
   
-  // Check if vehicle exists
-  db.get('SELECT vin FROM vehicles WHERE vin = ?', [cleanVin], (err, row) => {
+  // Check if vehicle exists (by VIN or RO for this customer)
+  const checkQuery = `
+    SELECT id FROM vehicles 
+    WHERE customer_id = ? AND (
+      (? IS NOT NULL AND vin = ?) OR 
+      (? IS NOT NULL AND repair_order = ?)
+    )
+  `;
+  
+  db.get(checkQuery, [customer_id, cleanVin, cleanVin, cleanRO, cleanRO], (err, row) => {
     if (err) {
       console.error('Error checking vehicle:', err.message);
       return res.status(500).json({ error: 'Database error' });
@@ -126,18 +303,20 @@ app.post('/api/vehicles', (req, res) => {
       // Update existing vehicle
       const updateQuery = `
         UPDATE vehicles 
-        SET status = ?, notes = ?, last_updated = ?, updated_by = ?
-        WHERE vin = ?
+        SET vin = COALESCE(?, vin), 
+            repair_order = COALESCE(?, repair_order),
+            status = ?, notes = ?, last_updated = ?, updated_by = ?
+        WHERE id = ?
       `;
       
-      db.run(updateQuery, [status, notes || '', currentTime, user || 'unknown', cleanVin], function(err) {
+      db.run(updateQuery, [cleanVin, cleanRO, status, notes || '', currentTime, user || 'unknown', row.id], function(err) {
         if (err) {
           console.error('Error updating vehicle:', err.message);
           res.status(500).json({ error: 'Database error' });
         } else {
           res.json({ 
             message: 'Vehicle updated successfully',
-            vin: cleanVin,
+            id: row.id,
             action: 'updated'
           });
         }
@@ -145,18 +324,18 @@ app.post('/api/vehicles', (req, res) => {
     } else {
       // Insert new vehicle
       const insertQuery = `
-        INSERT INTO vehicles (vin, status, notes, date_added, last_updated, created_by, updated_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO vehicles (vin, repair_order, customer_id, status, notes, date_added, last_updated, created_by, updated_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       
-      db.run(insertQuery, [cleanVin, status, notes || '', currentTime, currentTime, user || 'unknown', user || 'unknown'], function(err) {
+      db.run(insertQuery, [cleanVin, cleanRO, customer_id, status, notes || '', currentTime, currentTime, user || 'unknown', user || 'unknown'], function(err) {
         if (err) {
           console.error('Error inserting vehicle:', err.message);
           res.status(500).json({ error: 'Database error' });
         } else {
           res.status(201).json({ 
             message: 'Vehicle added successfully',
-            vin: cleanVin,
+            id: this.lastID,
             action: 'created'
           });
         }
@@ -165,11 +344,11 @@ app.post('/api/vehicles', (req, res) => {
   });
 });
 
-// Delete vehicle
-app.delete('/api/vehicles/:vin', (req, res) => {
-  const vin = req.params.vin.toUpperCase();
+// Delete vehicle by ID
+app.delete('/api/vehicles/:id', (req, res) => {
+  const vehicleId = req.params.id;
   
-  db.run('DELETE FROM vehicles WHERE vin = ?', [vin], function(err) {
+  db.run('DELETE FROM vehicles WHERE id = ?', [vehicleId], function(err) {
     if (err) {
       console.error('Error deleting vehicle:', err.message);
       res.status(500).json({ error: 'Database error' });
@@ -178,6 +357,62 @@ app.delete('/api/vehicles/:vin', (req, res) => {
     } else {
       res.json({ message: 'Vehicle deleted successfully' });
     }
+  });
+});
+
+// Email export endpoint
+app.post('/api/vehicles/export', (req, res) => {
+  const { customer_id, date_start, date_end, email } = req.body;
+  
+  if (!customer_id) {
+    return res.status(400).json({ error: 'Customer ID is required' });
+  }
+  
+  // Get customer info and vehicles
+  const customerQuery = 'SELECT name FROM customers WHERE id = ?';
+  
+  db.get(customerQuery, [customer_id], (err, customer) => {
+    if (err || !customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    
+    let vehiclesQuery = `
+      SELECT v.vin, v.repair_order, v.status, v.notes, v.date_added, v.last_updated
+      FROM vehicles v
+      WHERE v.customer_id = ?
+    `;
+    
+    const params = [customer_id];
+    
+    if (date_start) {
+      vehiclesQuery += ' AND DATE(v.date_added) >= DATE(?)';
+      params.push(date_start);
+    }
+    
+    if (date_end) {
+      vehiclesQuery += ' AND DATE(v.date_added) <= DATE(?)';
+      params.push(date_end);
+    }
+    
+    vehiclesQuery += ' ORDER BY v.date_added DESC';
+    
+    db.all(vehiclesQuery, params, (err, vehicles) => {
+      if (err) {
+        console.error('Error fetching vehicles for export:', err.message);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      
+      // Return data for email export (frontend will handle email generation)
+      res.json({
+        customer: customer.name,
+        vehicles: vehicles,
+        date_range: {
+          start: date_start,
+          end: date_end
+        },
+        generated_at: new Date().toISOString()
+      });
+    });
   });
 });
 
