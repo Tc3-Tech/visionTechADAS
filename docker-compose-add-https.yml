@@ -45,14 +45,14 @@ services:
     networks:
       - vin-network
 
-  # NEW: HTTPS on port 443 (proxies to port 9001)
+  # NEW: HTTPS on port 8443 (proxies to port 9001)
   caddy-https:
     build:
       context: ./caddy
       dockerfile: Dockerfile
     container_name: vin-scanner-https
     ports:
-      - "443:443"
+      - "8443:443"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
