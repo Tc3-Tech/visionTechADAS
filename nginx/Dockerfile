@@ -3,18 +3,22 @@ FROM nginx:alpine
 # Install certbot and dependencies
 RUN apk add --no-cache certbot certbot-nginx openssl
 
-# Copy initial nginx configuration (HTTP only for certificate request)
-COPY nginx-initial.conf /etc/nginx/conf.d/default.conf
+# Create directories first
+RUN mkdir -p /var/www/certbot /etc/letsencrypt/live /etc/letsencrypt/archive
 
-# Copy SSL-enabled configuration (will be used after certificate generation)
+# Copy all files
+COPY . /tmp/nginx-config/
+
+# Copy configurations
+COPY nginx-initial.conf /etc/nginx/conf.d/default.conf
 COPY nginx-ssl.conf /etc/nginx/conf.d/nginx-ssl.conf
 
-# Copy entrypoint script
+# Copy and setup entrypoint script
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Create directories
-RUN mkdir -p /var/www/certbot /etc/letsencrypt/live /etc/letsencrypt/archive
+# Debug: List files to verify they exist
+RUN ls -la /entrypoint.sh && head -5 /entrypoint.sh
 
 # Expose ports
 EXPOSE 80 443
