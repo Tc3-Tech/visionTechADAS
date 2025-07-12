@@ -30,7 +30,7 @@ services:
       dockerfile: Dockerfile
     container_name: vin-scanner-nginx
     ports:
-      - "8080:80"
+      - "9001:80"
     depends_on:
       - vin-scanner-api
     restart: unless-stopped
