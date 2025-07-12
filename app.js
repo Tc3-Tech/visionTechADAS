@@ -52,11 +52,39 @@ class VINScanner {
     }
 
     async captureAndProcess() {
+        // Set canvas to video dimensions
         this.canvas.width = this.video.videoWidth;
         this.canvas.height = this.video.videoHeight;
         this.ctx.drawImage(this.video, 0, 0);
         
-        const imageData = this.canvas.toDataURL('image/jpeg', 0.8);
+        // Calculate crop area (the blue overlay box)
+        const videoRect = this.video.getBoundingClientRect();
+        const scaleX = this.video.videoWidth / videoRect.width;
+        const scaleY = this.video.videoHeight / videoRect.height;
+        
+        // Blue box is 80% width, 60px height, centered
+        const cropWidth = this.video.videoWidth * 0.8;
+        const cropHeight = 60 * scaleY;
+        const cropX = (this.video.videoWidth - cropWidth) / 2;
+        const cropY = (this.video.videoHeight - cropHeight) / 2;
+        
+        // Create cropped canvas
+        const croppedCanvas = document.createElement('canvas');
+        const croppedCtx = croppedCanvas.getContext('2d');
+        croppedCanvas.width = cropWidth;
+        croppedCanvas.height = cropHeight;
+        
+        // Draw cropped area
+        croppedCtx.drawImage(
+            this.canvas,
+            cropX, cropY, cropWidth, cropHeight,
+            0, 0, cropWidth, cropHeight
+        );
+        
+        // Enhance the image for better OCR
+        this.enhanceImage(croppedCtx, cropWidth, cropHeight);
+        
+        const imageData = croppedCanvas.toDataURL('image/jpeg', 0.9);
         
         document.getElementById('captureBtn').disabled = true;
         document.getElementById('captureBtn').textContent = 'Processing...';
@@ -73,11 +101,40 @@ class VINScanner {
         }
     }
 
+    enhanceImage(ctx, width, height) {
+        // Get image data
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        
+        // Increase contrast and convert to grayscale
+        for (let i = 0; i < data.length; i += 4) {
+            // Convert to grayscale
+            const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+            
+            // Increase contrast
+            const contrast = 1.5;
+            const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+            const enhanced = factor * (gray - 128) + 128;
+            
+            // Apply thresholding for better text recognition
+            const threshold = enhanced > 128 ? 255 : 0;
+            
+            data[i] = threshold;     // Red
+            data[i + 1] = threshold; // Green
+            data[i + 2] = threshold; // Blue
+            // Alpha stays the same
+        }
+        
+        // Put enhanced image back
+        ctx.putImageData(imageData, 0, 0);
+    }
+
     async processVIN(imageData) {
         const { data: { text } } = await Tesseract.recognize(imageData, 'eng', {
             logger: m => console.log(m),
             tessedit_char_whitelist: 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',
-            tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+            tessedit_pageseg_mode: Tesseract.PSM.SINGLE_TEXT_LINE,
+            tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY,
             preserve_interword_spaces: '0'
         });
         
