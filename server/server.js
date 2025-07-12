@@ -225,7 +225,8 @@ function migrateVehiclesTable() {
             });
           });
         });
-  });
+      });
+    });
 }
 
 function createNewVehiclesTable(callback) {
