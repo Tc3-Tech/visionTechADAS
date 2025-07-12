@@ -47,16 +47,18 @@ services:
 
   # NEW: HTTPS on port 443 (proxies to port 9001)
   caddy-https:
-    image: caddy:alpine
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
     container_name: vin-scanner-https
     ports:
       - "443:443"
     volumes:
-      - ./Caddyfile-port443:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
     restart: unless-stopped
-    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   vin_data:

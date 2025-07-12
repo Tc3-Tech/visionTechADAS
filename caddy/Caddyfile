@@ -1,0 +1,13 @@
+visiontechadas.duckdns.org:443 {
+    # Enable CORS for all routes
+    header Access-Control-Allow-Origin "*"
+    header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    header Access-Control-Allow-Headers "Content-Type, Authorization"
+    
+    # Handle preflight requests
+    @options method OPTIONS
+    respond @options 204
+    
+    # Reverse proxy to existing VIN scanner on port 9001
+    reverse_proxy host.docker.internal:9001
+}
