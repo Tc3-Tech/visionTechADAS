@@ -11,7 +11,7 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'vehicles.db');
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+// Note: CORS handled by reverse proxy (Caddy)
 app.use(express.json());
 
 // Rate limiting
