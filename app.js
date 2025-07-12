@@ -4,10 +4,12 @@ class VINScanner {
         this.canvas = document.getElementById('canvas');
         this.ctx = this.canvas.getContext('2d');
         this.stream = null;
-        this.vehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
+        this.api = new VINScannerAPI();
+        this.vehicles = [];
         
         this.initEventListeners();
         this.loadVehicleList();
+        this.setupAutoRefresh();
     }
 
     initEventListeners() {
@@ -240,7 +242,7 @@ class VINScanner {
         document.getElementById('vinInput').focus();
     }
 
-    checkDuplicate(vin) {
+    async checkDuplicate(vin) {
         const cleanVin = vin.toUpperCase().trim();
         const feedback = document.getElementById('vinFeedback');
         
@@ -251,18 +253,25 @@ class VINScanner {
         }
         
         if (cleanVin.length === 17) {
-            const existing = this.vehicles.find(v => v.vin === cleanVin);
-            
-            if (existing) {
-                feedback.innerHTML = `⚠️ <strong>DUPLICATE!</strong> This VIN already exists with status: <span class="status-badge status-${existing.status}">${existing.status.replace('-', ' ')}</span><br>Last updated: ${new Date(existing.lastUpdated).toLocaleDateString()}`;
-                feedback.className = 'form-text text-danger';
+            try {
+                const existing = await this.api.getVehicleByVIN(cleanVin);
                 
-                // Pre-fill the existing data
-                document.getElementById('statusSelect').value = existing.status;
-                document.getElementById('notesInput').value = existing.notes;
-            } else {
-                feedback.textContent = '✅ New VIN - ready to save';
-                feedback.className = 'form-text text-success';
+                if (existing) {
+                    const lastUpdated = new Date(existing.last_updated).toLocaleDateString();
+                    feedback.innerHTML = `⚠️ <strong>DUPLICATE!</strong> This VIN already exists with status: <span class="status-badge status-${existing.status}">${existing.status.replace('-', ' ')}</span><br>Last updated: ${lastUpdated}`;
+                    feedback.className = 'form-text text-danger';
+                    
+                    // Pre-fill the existing data
+                    document.getElementById('statusSelect').value = existing.status;
+                    document.getElementById('notesInput').value = existing.notes || '';
+                } else {
+                    feedback.textContent = '✅ New VIN - ready to save';
+                    feedback.className = 'form-text text-success';
+                }
+            } catch (error) {
+                console.error('Error checking duplicate:', error);
+                feedback.textContent = 'Unable to check for duplicates - proceeding';
+                feedback.className = 'form-text text-warning';
             }
         }
     }
@@ -274,7 +283,7 @@ class VINScanner {
         document.getElementById('statusSelect').value = 'pending';
     }
 
-    saveVehicle() {
+    async saveVehicle() {
         const vin = document.getElementById('vinInput').value.trim();
         const status = document.getElementById('statusSelect').value;
         const notes = document.getElementById('notesInput').value.trim();
@@ -284,43 +293,69 @@ class VINScanner {
             return;
         }
         
-        const existingIndex = this.vehicles.findIndex(v => v.vin === vin);
-        const vehicle = {
-            vin: vin,
-            status: status,
-            notes: notes,
-            lastUpdated: new Date().toISOString(),
-            dateAdded: existingIndex >= 0 ? this.vehicles[existingIndex].dateAdded : new Date().toISOString()
-        };
-        
-        if (existingIndex >= 0) {
-            this.vehicles[existingIndex] = vehicle;
-        } else {
-            this.vehicles.push(vehicle);
+        try {
+            // Disable save button to prevent double-clicks
+            const saveBtn = document.querySelector('button[onclick="saveVehicle()"]');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            
+            const result = await this.api.saveVehicle({
+                vin: vin.toUpperCase(),
+                status: status,
+                notes: notes
+            });
+            
+            const message = result.action === 'updated' ? 'Vehicle updated successfully!' : 'Vehicle saved successfully!';
+            
+            // Show connection status
+            if (!this.api.isOnline) {
+                alert(message + ' (Saved locally - will sync when server is available)');
+            } else {
+                alert(message);
+            }
+            
+            this.resetScan();
+            await this.loadVehicleList();
+            
+        } catch (error) {
+            console.error('Error saving vehicle:', error);
+            alert('Error saving vehicle. Please try again.');
+        } finally {
+            // Re-enable save button
+            const saveBtn = document.querySelector('button[onclick="saveVehicle()"]');
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Vehicle';
         }
-        
-        localStorage.setItem('vehicles', JSON.stringify(this.vehicles));
-        
-        alert(existingIndex >= 0 ? 'Vehicle updated successfully!' : 'Vehicle saved successfully!');
-        this.resetScan();
-        this.loadVehicleList();
     }
 
-    loadVehicleList() {
+    async loadVehicleList() {
         const container = document.getElementById('vehicleList');
-        container.innerHTML = '';
+        container.innerHTML = '<div class="col-12"><p class="text-muted text-center">Loading vehicles...</p></div>';
         
-        if (this.vehicles.length === 0) {
-            container.innerHTML = '<div class="col-12"><p class="text-muted text-center">No vehicles scanned yet.</p></div>';
-            return;
+        try {
+            this.vehicles = await this.api.getAllVehicles();
+            
+            container.innerHTML = '';
+            
+            if (this.vehicles.length === 0) {
+                container.innerHTML = '<div class="col-12"><p class="text-muted text-center">No vehicles scanned yet.</p></div>';
+                return;
+            }
+            
+            this.vehicles
+                .sort((a, b) => new Date(b.last_updated) - new Date(a.last_updated))
+                .forEach(vehicle => {
+                    const card = this.createVehicleCard(vehicle);
+                    container.appendChild(card);
+                });
+                
+            // Show connection status
+            this.updateConnectionStatus();
+            
+        } catch (error) {
+            console.error('Error loading vehicles:', error);
+            container.innerHTML = '<div class="col-12"><p class="text-danger text-center">Error loading vehicles. Please refresh.</p></div>';
         }
-        
-        this.vehicles
-            .sort((a, b) => new Date(b.lastUpdated) - new Date(a.lastUpdated))
-            .forEach(vehicle => {
-                const card = this.createVehicleCard(vehicle);
-                container.appendChild(card);
-            });
     }
 
     createVehicleCard(vehicle) {
@@ -339,7 +374,7 @@ class VINScanner {
                     </p>
                     ${vehicle.notes ? `<p class="card-text">${vehicle.notes}</p>` : ''}
                     <p class="card-text">
-                        <small class="text-muted">Updated: ${new Date(vehicle.lastUpdated).toLocaleDateString()}</small>
+                        <small class="text-muted">Updated: ${new Date(vehicle.last_updated).toLocaleDateString()}</small>
                     </p>
                     <button class="btn btn-sm btn-outline-primary" onclick="editVehicle('${vehicle.vin}')">Edit</button>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle('${vehicle.vin}')">Delete</button>
@@ -369,6 +404,32 @@ class VINScanner {
             container.appendChild(card);
         });
     }
+
+    setupAutoRefresh() {
+        setInterval(async () => {
+            if (document.getElementById('vehicleListView').classList.contains('d-none')) {
+                return; // Don't refresh if not viewing vehicle list
+            }
+            await this.loadVehicleList();
+        }, CONFIG.AUTO_REFRESH_INTERVAL);
+    }
+
+    updateConnectionStatus() {
+        // Add a connection status indicator to the navbar
+        let statusIndicator = document.getElementById('connectionStatus');
+        if (!statusIndicator) {
+            statusIndicator = document.createElement('span');
+            statusIndicator.id = 'connectionStatus';
+            statusIndicator.className = 'navbar-text ms-3';
+            document.querySelector('.navbar-nav').appendChild(statusIndicator);
+        }
+        
+        if (this.api.isOnline) {
+            statusIndicator.innerHTML = '<i class="text-success">●</i> Online';
+        } else {
+            statusIndicator.innerHTML = '<i class="text-warning">●</i> Offline';
+        }
+    }
 }
 
 function showScanView() {
@@ -393,11 +454,16 @@ function editVehicle(vin) {
     }
 }
 
-function deleteVehicle(vin) {
+async function deleteVehicle(vin) {
     if (confirm('Are you sure you want to delete this vehicle?')) {
-        scanner.vehicles = scanner.vehicles.filter(v => v.vin !== vin);
-        localStorage.setItem('vehicles', JSON.stringify(scanner.vehicles));
-        scanner.loadVehicleList();
+        try {
+            await scanner.api.deleteVehicle(vin);
+            await scanner.loadVehicleList();
+            alert('Vehicle deleted successfully!');
+        } catch (error) {
+            console.error('Error deleting vehicle:', error);
+            alert('Error deleting vehicle. Please try again.');
+        }
     }
 }
 
