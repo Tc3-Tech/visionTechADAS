@@ -7,13 +7,16 @@ class VINScanner {
         this.api = new VINScannerAPI();
         this.vehicles = [];
         this.customers = [];
+        this.technicians = [];
         this.currentCustomerFilter = null;
         this.loadingVehicles = false;
         this.loadingCustomers = false;
+        this.loadingTechnicians = false;
         this.editingVehicleId = null; // Track if we're editing an existing vehicle
         
         this.initEventListeners();
         this.loadCustomers();
+        this.loadTechnicians();
         this.loadVehicleList();
         this.setupAutoRefresh();
     }
@@ -29,6 +32,9 @@ class VINScanner {
         document.getElementById('customerFilter').addEventListener('change', (e) => this.updateExportButton());
         document.getElementById('newCustomerName').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.addCustomer();
+        });
+        document.getElementById('newTechnicianName').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.addTechnician();
         });
     }
 
@@ -209,6 +215,7 @@ class VINScanner {
         document.getElementById('vinInput').value = '';
         document.getElementById('roInput').value = '';
         document.getElementById('customerSelect').value = '';
+        document.getElementById('technicianSelect').value = '';
         document.getElementById('statusSelect').value = 'pre-scan';
         document.getElementById('notesInput').value = '';
         document.getElementById('vinResult').classList.remove('d-none');
@@ -278,6 +285,7 @@ class VINScanner {
                 // Only pre-fill if we're not in edit mode
                 if (!this.editingVehicleId) {
                     document.getElementById('customerSelect').value = existing.customer_id;
+                    document.getElementById('technicianSelect').value = existing.technician_id || '';
                     document.getElementById('statusSelect').value = existing.status;
                     document.getElementById('notesInput').value = existing.notes || '';
                     if (existing.vin) document.getElementById('vinInput').value = existing.vin;
@@ -301,6 +309,7 @@ class VINScanner {
         document.getElementById('notesInput').value = '';
         document.getElementById('statusSelect').value = 'pre-scan';
         document.getElementById('customerSelect').value = '';
+        document.getElementById('technicianSelect').value = '';
         this.editingVehicleId = null; // Clear edit mode
     }
 
@@ -308,6 +317,7 @@ class VINScanner {
         const vin = document.getElementById('vinInput').value.trim();
         const ro = document.getElementById('roInput').value.trim();
         const customerId = document.getElementById('customerSelect').value;
+        const technicianId = document.getElementById('technicianSelect').value;
         const status = document.getElementById('statusSelect').value;
         const notes = document.getElementById('notesInput').value.trim();
         
@@ -335,6 +345,7 @@ class VINScanner {
                 vin: vin || null,
                 repair_order: ro || null,
                 customer_id: customerId,
+                technician_id: technicianId || null,
                 status: status,
                 notes: notes
             });
@@ -396,6 +407,42 @@ class VINScanner {
         });
     }
 
+    async loadTechnicians() {
+        if (this.loadingTechnicians) return; // Prevent duplicate requests
+        
+        try {
+            this.loadingTechnicians = true;
+            this.technicians = await this.api.getAllTechnicians();
+            this.populateTechnicianSelects();
+        } catch (error) {
+            console.error('Error loading technicians:', error);
+        } finally {
+            this.loadingTechnicians = false;
+        }
+    }
+
+    populateTechnicianSelects() {
+        const selects = ['technicianSelect'];
+        
+        selects.forEach(selectId => {
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            
+            // Clear existing options (except first)
+            while (select.children.length > 1) {
+                select.removeChild(select.lastChild);
+            }
+            
+            // Add technician options
+            this.technicians.forEach(technician => {
+                const option = document.createElement('option');
+                option.value = technician.id;
+                option.textContent = technician.name;
+                select.appendChild(option);
+            });
+        });
+    }
+
     async loadVehicleList() {
         if (this.loadingVehicles) return; // Prevent duplicate requests
         
@@ -448,6 +495,7 @@ class VINScanner {
                     <h5 class="card-title">${identifier}</h5>
                     <p class="card-text">
                         <strong>Customer:</strong> ${vehicle.customer_name}<br>
+                        <strong>Technician:</strong> ${vehicle.technician_name || 'Not assigned'}<br>
                         <strong>Type:</strong> ${identifierType}<br>
                         <span class="status-badge ${statusClass}">${statusText}</span>
                     </p>
@@ -552,6 +600,70 @@ class VINScanner {
         }
     }
 
+    async loadTechnicianList() {
+        const container = document.getElementById('technicianList');
+        container.innerHTML = '<div class="col-12"><p class="text-muted text-center">Loading technicians...</p></div>';
+        
+        try {
+            await this.loadTechnicians();
+            
+            container.innerHTML = '';
+            
+            if (this.technicians.length === 0) {
+                container.innerHTML = '<div class="col-12"><p class="text-muted text-center">No technicians found.</p></div>';
+                return;
+            }
+            
+            this.technicians.forEach(technician => {
+                const card = this.createTechnicianCard(technician);
+                container.appendChild(card);
+            });
+            
+        } catch (error) {
+            console.error('Error loading technicians:', error);
+            container.innerHTML = '<div class="col-12"><p class="text-danger text-center">Error loading technicians. Please refresh.</p></div>';
+        }
+    }
+
+    createTechnicianCard(technician) {
+        const col = document.createElement('div');
+        col.className = 'col-md-6 col-lg-4 mb-3';
+        
+        col.innerHTML = `
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">${technician.name}</h5>
+                    <p class="card-text">
+                        <small class="text-muted">Added: ${new Date(technician.date_added).toLocaleDateString()}</small>
+                    </p>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTechnician(${technician.id})">Delete</button>
+                </div>
+            </div>
+        `;
+        
+        return col;
+    }
+
+    async addTechnician() {
+        const name = document.getElementById('newTechnicianName').value.trim();
+        
+        if (!name) {
+            alert('Please enter a technician name.');
+            return;
+        }
+        
+        try {
+            await this.api.addTechnician(name);
+            document.getElementById('newTechnicianName').value = '';
+            await this.loadTechnicians();
+            await this.loadTechnicianList();
+            alert('Technician added successfully!');
+        } catch (error) {
+            console.error('Error adding technician:', error);
+            alert('Error adding technician. Technician may already exist.');
+        }
+    }
+
     updateExportButton() {
         const exportBtn = document.getElementById('exportBtn');
         const customerId = document.getElementById('customerFilter').value;
@@ -596,12 +708,14 @@ function showScanView() {
     document.getElementById('scanView').classList.remove('d-none');
     document.getElementById('vehicleListView').classList.add('d-none');
     document.getElementById('customerView').classList.add('d-none');
+    document.getElementById('technicianView').classList.add('d-none');
 }
 
 function showVehicleList() {
     document.getElementById('scanView').classList.add('d-none');
     document.getElementById('vehicleListView').classList.remove('d-none');
     document.getElementById('customerView').classList.add('d-none');
+    document.getElementById('technicianView').classList.add('d-none');
     scanner.loadVehicleList();
 }
 
@@ -609,7 +723,16 @@ function showCustomerView() {
     document.getElementById('scanView').classList.add('d-none');
     document.getElementById('vehicleListView').classList.add('d-none');
     document.getElementById('customerView').classList.remove('d-none');
+    document.getElementById('technicianView').classList.add('d-none');
     scanner.loadCustomerList();
+}
+
+function showTechnicianView() {
+    document.getElementById('scanView').classList.add('d-none');
+    document.getElementById('vehicleListView').classList.add('d-none');
+    document.getElementById('customerView').classList.add('d-none');
+    document.getElementById('technicianView').classList.remove('d-none');
+    scanner.loadTechnicianList();
 }
 
 // Vehicle management functions
@@ -621,6 +744,7 @@ async function editVehicle(vehicleId) {
             scanner.editingVehicleId = vehicleId;
             
             document.getElementById('customerSelect').value = vehicle.customer_id;
+            document.getElementById('technicianSelect').value = vehicle.technician_id || '';
             document.getElementById('vinInput').value = vehicle.vin || '';
             document.getElementById('roInput').value = vehicle.repair_order || '';
             document.getElementById('statusSelect').value = vehicle.status;
@@ -682,6 +806,38 @@ function showAddCustomer() {
         }).catch(error => {
             console.error('Error adding customer:', error);
             alert('Error adding customer. Customer may already exist.');
+        });
+    }
+}
+
+// Technician management functions
+async function deleteTechnician(technicianId) {
+    if (confirm('Are you sure you want to delete this technician? This will only work if they have no vehicles.')) {
+        try {
+            await scanner.api.deleteTechnician(technicianId);
+            await scanner.loadTechnicians();
+            await scanner.loadTechnicianList();
+            alert('Technician deleted successfully!');
+        } catch (error) {
+            console.error('Error deleting technician:', error);
+            alert('Error deleting technician. They may have existing vehicles.');
+        }
+    }
+}
+
+function addTechnician() {
+    scanner.addTechnician();
+}
+
+function showAddTechnician() {
+    const name = prompt('Enter technician name:');
+    if (name && name.trim()) {
+        scanner.api.addTechnician(name.trim()).then(() => {
+            scanner.loadTechnicians();
+            alert('Technician added successfully!');
+        }).catch(error => {
+            console.error('Error adding technician:', error);
+            alert('Error adding technician. Technician may already exist.');
         });
     }
 }
