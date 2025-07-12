@@ -75,14 +75,34 @@ class VINScanner {
 
     async processVIN(imageData) {
         const { data: { text } } = await Tesseract.recognize(imageData, 'eng', {
-            logger: m => console.log(m)
+            logger: m => console.log(m),
+            tessedit_char_whitelist: 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',
+            tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+            preserve_interword_spaces: '0'
         });
         
+        console.log('OCR Raw text:', text);
+        
+        // Clean the text first
+        const cleanText = text.replace(/[^A-HJ-NPR-Z0-9]/g, '');
+        console.log('Cleaned text:', cleanText);
+        
+        // Look for 17-character sequences
         const vinPattern = /[A-HJ-NPR-Z0-9]{17}/g;
-        const matches = text.match(vinPattern);
+        const matches = cleanText.match(vinPattern);
         
         if (matches && matches.length > 0) {
-            return this.cleanVIN(matches[0]);
+            console.log('Found VIN:', matches[0]);
+            return matches[0];
+        }
+        
+        // Fallback: look for any sequence that could be a partial VIN
+        const partialPattern = /[A-HJ-NPR-Z0-9]{10,17}/g;
+        const partialMatches = cleanText.match(partialPattern);
+        
+        if (partialMatches && partialMatches.length > 0) {
+            console.log('Found partial VIN:', partialMatches[0]);
+            return partialMatches[0];
         }
         
         return '';
