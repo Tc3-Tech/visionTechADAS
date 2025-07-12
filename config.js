@@ -3,7 +3,7 @@ const CONFIG = {
     // Server configuration
     API_BASE_URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
         ? 'http://localhost:3000/api'  // Development
-        : 'http://visiontechadas.duckdns.org:9001/api',  // Production (Port 9001)
+        : 'https://visiontechadas.duckdns.org/api',  // Production (HTTPS)
     
     // Fallback to localStorage if server is unavailable
     ENABLE_OFFLINE_MODE: true,

@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  vin-scanner-api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: vin-scanner-server
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/data/vehicles.db
+    volumes:
+      - vin_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - vin-network
+
+  caddy:
+    image: caddy:alpine
+    container_name: vin-scanner-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - vin-scanner-api
+    restart: unless-stopped
+    networks:
+      - vin-network
+
+volumes:
+  vin_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+
+networks:
+  vin-network:
+    driver: bridge
