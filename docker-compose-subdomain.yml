@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # Existing VIN scanner (unchanged)
+  vin-scanner-api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: vin-scanner-server
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/data/vehicles.db
+    volumes:
+      - vin_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - vin-network
+
+  # Existing nginx (unchanged)
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: vin-scanner-nginx
+    ports:
+      - "9001:80"
+    depends_on:
+      - vin-scanner-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - vin-network
+
+  # NEW: HTTPS proxy for subdomain
+  caddy-https:
+    image: caddy:alpine
+    container_name: vin-scanner-https
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile-subdomain:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  vin_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+
+networks:
+  vin-network:
+    driver: bridge
