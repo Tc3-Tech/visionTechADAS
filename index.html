@@ -51,8 +51,9 @@
             font-weight: 600;
         }
         
-        .status-pending { background-color: #ffc107; color: #000; }
-        .status-in-progress { background-color: #17a2b8; color: #fff; }
+        .status-pre-scan { background-color: #ffc107; color: #000; }
+        .status-post-scan { background-color: #fd7e14; color: #fff; }
+        .status-calibration { background-color: #17a2b8; color: #fff; }
         .status-completed { background-color: #28a745; color: #fff; }
     </style>
 </head>
@@ -109,8 +110,9 @@
                             <div class="mb-3">
                                 <label for="statusSelect" class="form-label">Work Status</label>
                                 <select class="form-select" id="statusSelect">
-                                    <option value="pending">Pending</option>
-                                    <option value="in-progress">In Progress</option>
+                                    <option value="pre-scan">Pre-Scan</option>
+                                    <option value="post-scan">Post-Scan</option>
+                                    <option value="calibration">Calibration</option>
                                     <option value="completed">Completed</option>
                                 </select>
                             </div>

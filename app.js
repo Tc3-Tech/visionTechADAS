@@ -280,7 +280,7 @@ class VINScanner {
         document.getElementById('vinResult').classList.add('d-none');
         document.getElementById('vinInput').value = '';
         document.getElementById('notesInput').value = '';
-        document.getElementById('statusSelect').value = 'pending';
+        document.getElementById('statusSelect').value = 'pre-scan';
     }
 
     async saveVehicle() {

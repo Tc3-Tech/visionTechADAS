@@ -36,7 +36,7 @@ function initDatabase() {
     CREATE TABLE IF NOT EXISTS vehicles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       vin TEXT UNIQUE NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('pending', 'in-progress', 'completed')),
+      status TEXT NOT NULL CHECK(status IN ('pre-scan', 'post-scan', 'calibration', 'completed')),
       notes TEXT,
       date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -108,7 +108,7 @@ app.post('/api/vehicles', (req, res) => {
     return res.status(400).json({ error: 'VIN must be exactly 17 characters' });
   }
   
-  if (!['pending', 'in-progress', 'completed'].includes(status)) {
+  if (!['pre-scan', 'post-scan', 'calibration', 'completed'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
   

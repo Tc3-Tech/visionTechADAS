@@ -241,8 +241,9 @@ class VINScannerAPI {
         const vehicles = this.getLocalVehicles();
         return {
             total: vehicles.length,
-            pending: vehicles.filter(v => v.status === 'pending').length,
-            in_progress: vehicles.filter(v => v.status === 'in-progress').length,
+            pre_scan: vehicles.filter(v => v.status === 'pre-scan').length,
+            post_scan: vehicles.filter(v => v.status === 'post-scan').length,
+            calibration: vehicles.filter(v => v.status === 'calibration').length,
             completed: vehicles.filter(v => v.status === 'completed').length
         };
     }
