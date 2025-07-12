@@ -11,6 +11,8 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'vehicles.db');
 
 // Middleware
 app.use(helmet());
+// Trust proxy for rate limiting behind reverse proxy
+app.set('trust proxy', true);
 // Note: CORS handled by reverse proxy (Caddy)
 app.use(express.json());
 
@@ -155,63 +157,70 @@ function migrateVehiclesTable() {
               console.log('Default customer ID:', defaultCustomerId);
               console.log('Default technician ID:', defaultTechnicianId);
               
-              // Rename old table and create new one
+              // Clean up any previous failed migration and rename old table
               db.serialize(() => {
-                db.run('ALTER TABLE vehicles RENAME TO vehicles_old', (err) => {
-                  if (err) {
-                    console.error('Error renaming old vehicles table:', err.message);
-                    return;
+                // First, drop vehicles_old if it exists from a previous failed migration
+                db.run('DROP TABLE IF EXISTS vehicles_old', (dropErr) => {
+                  if (dropErr) {
+                    console.error('Error dropping old vehicles_old table:', dropErr.message);
                   }
                   
-                  // Create new vehicles table
-                  createNewVehiclesTable(() => {
-                    // Migrate data from old table
-                    db.all('SELECT * FROM vehicles_old', (err, oldVehicles) => {
-                      if (err) {
-                        console.error('Error reading old vehicles:', err.message);
-                        return;
-                      }
-                      
-                      console.log(`Migrating ${oldVehicles.length} vehicles...`);
-                      
-                      const stmt = db.prepare(`
-                        INSERT INTO vehicles (vin, repair_order, customer_id, technician_id, status, notes, date_added, last_updated, created_by, updated_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                      `);
-                      
-                      oldVehicles.forEach(vehicle => {
-                        stmt.run(
-                          vehicle.vin || null,
-                          null, // No repair_order in old schema
-                          defaultCustomerId,
-                          defaultTechnicianId,
-                          vehicle.status || 'pre-scan',
-                          vehicle.notes || '',
-                          vehicle.date_added || new Date().toISOString(),
-                          vehicle.last_updated || vehicle.date_added || new Date().toISOString(),
-                          vehicle.created_by || 'migration',
-                          vehicle.updated_by || vehicle.created_by || 'migration'
-                        );
-                      });
-                      
-                      stmt.finalize((err) => {
+                  // Now rename current table to vehicles_old
+                  db.run('ALTER TABLE vehicles RENAME TO vehicles_old', (err) => {
+                    if (err) {
+                      console.error('Error renaming old vehicles table:', err.message);
+                      return;
+                    }
+                  
+                    // Create new vehicles table
+                    createNewVehiclesTable(() => {
+                      // Migrate data from old table
+                      db.all('SELECT * FROM vehicles_old', (err, oldVehicles) => {
                         if (err) {
-                          console.error('Error migrating vehicles:', err.message);
-                        } else {
-                          console.log('Vehicle migration completed successfully');
-                          // Drop old table
-                          db.run('DROP TABLE vehicles_old', (err) => {
-                            if (err) {
-                              console.error('Error dropping old table:', err.message);
-                            } else {
-                              console.log('Old vehicles table cleaned up');
-                            }
-                          });
+                          console.error('Error reading old vehicles:', err.message);
+                          return;
                         }
+                        
+                        console.log(`Migrating ${oldVehicles.length} vehicles...`);
+                        
+                        const stmt = db.prepare(`
+                          INSERT INTO vehicles (vin, repair_order, customer_id, technician_id, status, notes, date_added, last_updated, created_by, updated_by)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        `);
+                        
+                        oldVehicles.forEach(vehicle => {
+                          stmt.run(
+                            vehicle.vin || null,
+                            null, // No repair_order in old schema
+                            defaultCustomerId,
+                            defaultTechnicianId,
+                            vehicle.status || 'pre-scan',
+                            vehicle.notes || '',
+                            vehicle.date_added || new Date().toISOString(),
+                            vehicle.last_updated || vehicle.date_added || new Date().toISOString(),
+                            vehicle.created_by || 'migration',
+                            vehicle.updated_by || vehicle.created_by || 'migration'
+                          );
+                        });
+                        
+                        stmt.finalize((err) => {
+                          if (err) {
+                            console.error('Error migrating vehicles:', err.message);
+                          } else {
+                            console.log('Vehicle migration completed successfully');
+                            // Drop old table
+                            db.run('DROP TABLE vehicles_old', (err) => {
+                              if (err) {
+                                console.error('Error dropping old table:', err.message);
+                              } else {
+                                console.log('Old vehicles table cleaned up');
+                              }
+                            });
+                          }
+                        });
                       });
                     });
                   });
-                });
               });
             });
           });
