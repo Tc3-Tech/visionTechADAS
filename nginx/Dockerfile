@@ -1,27 +1,16 @@
 FROM nginx:alpine
 
-# Install certbot and dependencies
-RUN apk add --no-cache certbot certbot-nginx openssl
+# Install curl for health checks
+RUN apk add --no-cache curl
 
-# Create directories first
-RUN mkdir -p /var/www/certbot /etc/letsencrypt/live /etc/letsencrypt/archive
+# Copy nginx configuration for HTTP with CORS
+COPY nginx-http.conf /etc/nginx/conf.d/default.conf
 
-# Copy all files
-COPY . /tmp/nginx-config/
+# Create webroot directory
+RUN mkdir -p /var/www/html
 
-# Copy configurations
-COPY nginx-initial.conf /etc/nginx/conf.d/default.conf
-COPY nginx-ssl.conf /etc/nginx/conf.d/nginx-ssl.conf
+# Expose port 80
+EXPOSE 80
 
-# Copy and setup entrypoint script
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Debug: List files to verify they exist
-RUN ls -la /entrypoint.sh && head -5 /entrypoint.sh
-
-# Expose ports
-EXPOSE 80 443
-
-# Use custom entrypoint
-ENTRYPOINT ["/entrypoint.sh"]
+# Start nginx normally
+CMD ["nginx", "-g", "daemon off;"]
