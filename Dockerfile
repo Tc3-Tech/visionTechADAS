@@ -4,8 +4,9 @@ FROM node:18-alpine
 # Set working directory in container
 WORKDIR /app
 
-# Create data directory for SQLite database
-RUN mkdir -p /data && chmod 755 /data
+# Install curl for health checks and create data directory for SQLite database
+RUN apk add --no-cache curl && \
+    mkdir -p /data && chmod 755 /data
 
 # Copy package.json and package-lock.json (if available)
 COPY server/package*.json ./
