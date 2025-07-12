@@ -73,6 +73,9 @@
                         <li class="nav-item">
                             <a class="nav-link" href="#" onclick="showVehicleList()">Vehicles</a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" onclick="showCustomerView()">Customers</a>
+                        </li>
                     </ul>
                 </div>
             </div>
@@ -103,9 +106,24 @@
                         <div class="card-body">
                             <h5 class="card-title">Detected VIN</h5>
                             <div class="mb-3">
-                                <label for="vinInput" class="form-label">VIN Number</label>
-                                <input type="text" class="form-control" id="vinInput" maxlength="17" style="text-transform: uppercase;">
-                                <div id="vinFeedback" class="form-text">Verify and correct if needed</div>
+                                <label for="customerSelect" class="form-label">Customer *</label>
+                                <select class="form-select" id="customerSelect" required>
+                                    <option value="">Select Customer...</option>
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="showAddCustomer()">Add New Customer</button>
+                            </div>
+                            <div class="mb-3">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <label for="vinInput" class="form-label">VIN Number</label>
+                                        <input type="text" class="form-control" id="vinInput" maxlength="17" style="text-transform: uppercase;" placeholder="17-character VIN">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="roInput" class="form-label">Repair Order</label>
+                                        <input type="text" class="form-control" id="roInput" placeholder="RO Number">
+                                    </div>
+                                </div>
+                                <div id="vinFeedback" class="form-text">Enter either VIN or Repair Order (or both)</div>
                             </div>
                             <div class="mb-3">
                                 <label for="statusSelect" class="form-label">Work Status</label>
@@ -132,10 +150,58 @@
             <div class="row">
                 <div class="col-12">
                     <h2 class="mb-4">Vehicle List</h2>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="customerFilter" class="form-label">Filter by Customer</label>
+                            <select class="form-select" id="customerFilter">
+                                <option value="">All Customers</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="dateStart" class="form-label">From Date</label>
+                            <input type="date" class="form-control" id="dateStart">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="dateEnd" class="form-label">To Date</label>
+                            <input type="date" class="form-control" id="dateEnd">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">&nbsp;</label>
+                            <button class="btn btn-primary w-100" onclick="filterVehicles()">Filter</button>
+                        </div>
+                    </div>
                     <div class="mb-3">
-                        <input type="text" class="form-control" id="searchInput" placeholder="Search by VIN...">
+                        <input type="text" class="form-control" id="searchInput" placeholder="Search by VIN or RO...">
+                    </div>
+                    <div class="mb-3">
+                        <button class="btn btn-success" id="exportBtn" onclick="exportCustomerData()" disabled>Export Selected Customer</button>
                     </div>
                     <div id="vehicleList" class="row">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="customerView" class="container mt-4 d-none">
+            <div class="row">
+                <div class="col-12">
+                    <h2 class="mb-4">Customer Management</h2>
+                    <div class="mb-4">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Add New Customer</h5>
+                                <div class="row">
+                                    <div class="col-md-8">
+                                        <input type="text" class="form-control" id="newCustomerName" placeholder="Customer Name">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button class="btn btn-primary" onclick="addCustomer()">Add Customer</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="customerList" class="row">
                     </div>
                 </div>
             </div>
