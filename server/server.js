@@ -32,7 +32,7 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 });
 
 function initDatabase() {
-  // Create customers table
+  // Create customers table first
   const createCustomersTable = `
     CREATE TABLE IF NOT EXISTS customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +42,139 @@ function initDatabase() {
     )
   `;
   
-  // Update vehicles table for VIN/RO and customer relationship
+  db.run(createCustomersTable, (err) => {
+    if (err) {
+      console.error('Error creating customers table:', err.message);
+    } else {
+      console.log('Customers table ready');
+      
+      // Check if we need to migrate existing vehicles table
+      db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='vehicles'", (err, row) => {
+        if (err) {
+          console.error('Error checking vehicles table:', err.message);
+          return;
+        }
+        
+        if (row) {
+          // Table exists, check if it has customer_id column
+          db.get("PRAGMA table_info(vehicles)", (err, info) => {
+            if (err) {
+              console.error('Error checking vehicles schema:', err.message);
+              return;
+            }
+            
+            // Get all column info
+            db.all("PRAGMA table_info(vehicles)", (err, columns) => {
+              if (err) {
+                console.error('Error getting column info:', err.message);
+                return;
+              }
+              
+              const hasCustomerId = columns.some(col => col.name === 'customer_id');
+              const hasRepairOrder = columns.some(col => col.name === 'repair_order');
+              
+              if (!hasCustomerId || !hasRepairOrder) {
+                console.log('Migrating existing vehicles table...');
+                migrateVehiclesTable();
+              } else {
+                console.log('Vehicles table schema is up to date');
+              }
+            });
+          });
+        } else {
+          // No vehicles table exists, create new one
+          createNewVehiclesTable();
+        }
+      });
+    }
+  });
+}
+
+function migrateVehiclesTable() {
+  // Create default customer for existing vehicles
+  const defaultCustomerName = 'Legacy Customer';
+  
+  db.run('INSERT OR IGNORE INTO customers (name, created_by) VALUES (?, ?)', 
+    [defaultCustomerName, 'migration'], 
+    function(err) {
+      if (err) {
+        console.error('Error creating default customer:', err.message);
+        return;
+      }
+      
+      // Get the default customer ID
+      db.get('SELECT id FROM customers WHERE name = ?', [defaultCustomerName], (err, customer) => {
+        if (err) {
+          console.error('Error getting default customer:', err.message);
+          return;
+        }
+        
+        const defaultCustomerId = customer.id;
+        console.log('Default customer ID:', defaultCustomerId);
+        
+        // Rename old table and create new one
+        db.serialize(() => {
+          db.run('ALTER TABLE vehicles RENAME TO vehicles_old', (err) => {
+            if (err) {
+              console.error('Error renaming old vehicles table:', err.message);
+              return;
+            }
+            
+            // Create new vehicles table
+            createNewVehiclesTable(() => {
+              // Migrate data from old table
+              db.all('SELECT * FROM vehicles_old', (err, oldVehicles) => {
+                if (err) {
+                  console.error('Error reading old vehicles:', err.message);
+                  return;
+                }
+                
+                console.log(`Migrating ${oldVehicles.length} vehicles...`);
+                
+                const stmt = db.prepare(`
+                  INSERT INTO vehicles (vin, repair_order, customer_id, status, notes, date_added, last_updated, created_by, updated_by)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `);
+                
+                oldVehicles.forEach(vehicle => {
+                  stmt.run(
+                    vehicle.vin || null,
+                    null, // No repair_order in old schema
+                    defaultCustomerId,
+                    vehicle.status || 'pre-scan',
+                    vehicle.notes || '',
+                    vehicle.date_added || new Date().toISOString(),
+                    vehicle.last_updated || vehicle.date_added || new Date().toISOString(),
+                    vehicle.created_by || 'migration',
+                    vehicle.updated_by || vehicle.created_by || 'migration'
+                  );
+                });
+                
+                stmt.finalize((err) => {
+                  if (err) {
+                    console.error('Error migrating vehicles:', err.message);
+                  } else {
+                    console.log('Vehicle migration completed successfully');
+                    // Drop old table
+                    db.run('DROP TABLE vehicles_old', (err) => {
+                      if (err) {
+                        console.error('Error dropping old table:', err.message);
+                      } else {
+                        console.log('Old vehicles table cleaned up');
+                      }
+                    });
+                  }
+                });
+              });
+            });
+          });
+        });
+      });
+    }
+  );
+}
+
+function createNewVehiclesTable(callback) {
   const createVehiclesTable = `
     CREATE TABLE IF NOT EXISTS vehicles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,20 +194,13 @@ function initDatabase() {
     )
   `;
   
-  db.run(createCustomersTable, (err) => {
-    if (err) {
-      console.error('Error creating customers table:', err.message);
-    } else {
-      console.log('Customers table ready');
-    }
-  });
-  
   db.run(createVehiclesTable, (err) => {
     if (err) {
       console.error('Error creating vehicles table:', err.message);
     } else {
       console.log('Vehicles table ready');
     }
+    if (callback) callback(err);
   });
 }
 
