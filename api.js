@@ -62,6 +62,11 @@ class VINScannerAPI {
         } catch (error) {
             console.error('API request failed:', error);
             
+            // Don't retry or go offline for 404s (not found is a valid response)
+            if (error.message.includes('404')) {
+                throw error;
+            }
+            
             // If server fails and we have offline mode enabled
             if (CONFIG.ENABLE_OFFLINE_MODE && this.retryAttempts < CONFIG.MAX_RETRY_ATTEMPTS) {
                 this.retryAttempts++;
@@ -98,9 +103,11 @@ class VINScannerAPI {
             return await this.makeRequest(`/vehicles/${vin}`);
         } catch (error) {
             if (error.message.includes('404')) {
+                // 404 is expected for new VINs - don't go offline or retry
                 return null; // Vehicle not found
             }
             if (CONFIG.ENABLE_OFFLINE_MODE) {
+                console.log('Server error, falling back to local storage');
                 return this.getLocalVehicle(vin);
             }
             throw error;
