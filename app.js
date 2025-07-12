@@ -29,7 +29,7 @@ class VINScanner {
         document.getElementById('vinInput').addEventListener('input', (e) => this.checkDuplicate());
         document.getElementById('roInput').addEventListener('input', (e) => this.checkDuplicate());
         document.getElementById('searchInput').addEventListener('input', (e) => this.searchVehicles(e.target.value));
-        document.getElementById('customerFilter').addEventListener('change', (e) => this.updateExportButton());
+        document.getElementById('customerFilter').addEventListener('change', (e) => {});
         document.getElementById('newCustomerName').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.addCustomer();
         });
@@ -492,6 +492,12 @@ class VINScanner {
         col.innerHTML = `
             <div class="card">
                 <div class="card-body">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input vehicle-checkbox" type="checkbox" value="${vehicle.id}" id="vehicle-${vehicle.id}" onchange="updateExportButton()">
+                        <label class="form-check-label" for="vehicle-${vehicle.id}">
+                            <strong>Select for export</strong>
+                        </label>
+                    </div>
                     <h5 class="card-title">${identifier}</h5>
                     <p class="card-text">
                         <strong>Customer:</strong> ${vehicle.customer_name}<br>
@@ -666,15 +672,14 @@ class VINScanner {
 
     updateExportButton() {
         const exportBtn = document.getElementById('exportBtn');
-        const customerId = document.getElementById('customerFilter').value;
+        const selectedCheckboxes = document.querySelectorAll('.vehicle-checkbox:checked');
         
-        if (customerId) {
+        if (selectedCheckboxes.length > 0) {
             exportBtn.disabled = false;
-            const customerName = this.customers.find(c => c.id == customerId)?.name || 'Selected Customer';
-            exportBtn.textContent = `Export ${customerName}`;
+            exportBtn.textContent = `Export ${selectedCheckboxes.length} Vehicle${selectedCheckboxes.length > 1 ? 's' : ''}`;
         } else {
             exportBtn.disabled = true;
-            exportBtn.textContent = 'Export Selected Customer';
+            exportBtn.textContent = 'Export Selected Vehicles';
         }
     }
 
@@ -842,56 +847,69 @@ function showAddTechnician() {
     }
 }
 
+// Selection functions
+function selectAllVehicles() {
+    const checkboxes = document.querySelectorAll('.vehicle-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = true;
+    });
+    updateExportButton();
+}
+
+function selectNoneVehicles() {
+    const checkboxes = document.querySelectorAll('.vehicle-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    updateExportButton();
+}
+
 // Filtering and export functions
 function filterVehicles() {
     scanner.loadVehicleList();
 }
 
-async function exportCustomerData() {
-    const customerId = document.getElementById('customerFilter').value;
-    const dateStart = document.getElementById('dateStart').value;
-    const dateEnd = document.getElementById('dateEnd').value;
+async function exportSelectedVehicles() {
+    const selectedCheckboxes = document.querySelectorAll('.vehicle-checkbox:checked');
     
-    if (!customerId) {
-        alert('Please select a customer to export.');
+    if (selectedCheckboxes.length === 0) {
+        alert('Please select at least one vehicle to export.');
         return;
     }
     
     try {
-        const exportData = await scanner.api.exportCustomerData(customerId, dateStart, dateEnd);
+        // Get selected vehicle IDs
+        const selectedIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+        
+        // Find selected vehicles from current vehicle list
+        const selectedVehicles = scanner.vehicles.filter(vehicle => 
+            selectedIds.includes(vehicle.id.toString())
+        );
         
         // Create downloadable content
-        let content = `Vehicle Report for ${exportData.customer}\n`;
-        content += `Generated: ${new Date(exportData.generated_at).toLocaleString()}\n`;
-        if (exportData.date_range.start || exportData.date_range.end) {
-            content += `Date Range: ${exportData.date_range.start || 'Beginning'} to ${exportData.date_range.end || 'End'}\n`;
-        }
-        content += `\n`;
+        let content = `Vehicle Export Report\n`;
+        content += `Generated: ${new Date().toLocaleString()}\n`;
+        content += `Total Vehicles: ${selectedVehicles.length}\n\n`;
         
-        if (exportData.vehicles.length === 0) {
-            content += 'No vehicles found for this customer in the specified date range.\n';
-        } else {
-            content += `Total Vehicles: ${exportData.vehicles.length}\n\n`;
-            
-            exportData.vehicles.forEach((vehicle, index) => {
-                content += `${index + 1}. `;
-                if (vehicle.vin) content += `VIN: ${vehicle.vin}`;
-                if (vehicle.vin && vehicle.repair_order) content += ` | `;
-                if (vehicle.repair_order) content += `RO: ${vehicle.repair_order}`;
-                content += `\n   Status: ${vehicle.status.replace('-', ' ').toUpperCase()}`;
-                content += `\n   Date Added: ${new Date(vehicle.date_added).toLocaleDateString()}`;
-                content += `\n   Last Updated: ${new Date(vehicle.last_updated).toLocaleDateString()}`;
-                if (vehicle.notes) content += `\n   Notes: ${vehicle.notes}`;
-                content += `\n\n`;
-            });
-        }
+        selectedVehicles.forEach((vehicle, index) => {
+            content += `${index + 1}. `;
+            if (vehicle.vin) content += `VIN: ${vehicle.vin}`;
+            if (vehicle.vin && vehicle.repair_order) content += ` | `;
+            if (vehicle.repair_order) content += `RO: ${vehicle.repair_order}`;
+            content += `\n   Customer: ${vehicle.customer_name}`;
+            if (vehicle.technician_name) content += `\n   Technician: ${vehicle.technician_name}`;
+            content += `\n   Status: ${vehicle.status.replace('-', ' ').toUpperCase()}`;
+            content += `\n   Date Added: ${new Date(vehicle.date_added).toLocaleDateString()}`;
+            content += `\n   Last Updated: ${new Date(vehicle.last_updated).toLocaleDateString()}`;
+            content += `\n\n`;
+        });
         
         // Create and download file
         const blob = new Blob([content], { type: 'text/plain' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${exportData.customer.replace(/[^a-z0-9]/gi, '_')}_vehicle_report_${new Date().toISOString().split('T')[0]}.txt`;
+        a.download = `vehicle_export_${new Date().toISOString().split('T')[0]}.txt`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -900,9 +918,14 @@ async function exportCustomerData() {
         alert('Vehicle report downloaded successfully!');
         
     } catch (error) {
-        console.error('Error exporting customer data:', error);
+        console.error('Error exporting vehicles:', error);
         alert('Error generating report. Please try again.');
     }
+}
+
+// Export utility functions
+function updateExportButton() {
+    scanner.updateExportButton();
 }
 
 // Utility functions

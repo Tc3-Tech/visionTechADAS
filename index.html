@@ -216,7 +216,15 @@
                         <input type="text" class="form-control" id="searchInput" placeholder="Search by VIN or RO...">
                     </div>
                     <div class="mb-3">
-                        <button class="btn btn-success" id="exportBtn" onclick="exportCustomerData()" disabled>Export Selected Customer</button>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <button class="btn btn-outline-primary" id="selectAllBtn" onclick="selectAllVehicles()">Select All</button>
+                                <button class="btn btn-outline-secondary ms-2" id="selectNoneBtn" onclick="selectNoneVehicles()">Select None</button>
+                            </div>
+                            <div class="col-md-6 text-end">
+                                <button class="btn btn-success" id="exportBtn" onclick="exportSelectedVehicles()" disabled>Export Selected Vehicles</button>
+                            </div>
+                        </div>
                     </div>
                     <div id="vehicleList" class="row">
                     </div>
