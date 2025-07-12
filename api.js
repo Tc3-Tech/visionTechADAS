@@ -78,37 +78,140 @@ class VINScannerAPI {
         }
     }
 
-    async getAllVehicles() {
+    // Customer API methods
+    async getAllCustomers() {
         if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
-            return this.getLocalVehicles();
+            return this.getLocalCustomers();
         }
 
         try {
-            return await this.makeRequest('/vehicles');
+            return await this.makeRequest('/customers');
         } catch (error) {
             if (CONFIG.ENABLE_OFFLINE_MODE) {
-                console.log('Falling back to local storage');
-                return this.getLocalVehicles();
+                console.log('Falling back to local storage for customers');
+                return this.getLocalCustomers();
             }
             throw error;
         }
     }
 
-    async getVehicleByVIN(vin) {
+    async addCustomer(name) {
+        const payload = {
+            name: name.trim(),
+            user: this.userId
+        };
+
         if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
-            return this.getLocalVehicle(vin);
+            return this.saveLocalCustomer(payload);
         }
 
         try {
-            return await this.makeRequest(`/vehicles/${vin}`);
+            const result = await this.makeRequest('/customers', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            
+            // Also save locally as backup
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                this.saveLocalCustomer(payload);
+            }
+            
+            return result;
+        } catch (error) {
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                console.log('Server unavailable, saving customer locally');
+                return this.saveLocalCustomer(payload);
+            }
+            throw error;
+        }
+    }
+
+    async deleteCustomer(customerId) {
+        if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
+            return this.deleteLocalCustomer(customerId);
+        }
+
+        try {
+            const result = await this.makeRequest(`/customers/${customerId}`, {
+                method: 'DELETE'
+            });
+            
+            // Also delete locally
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                this.deleteLocalCustomer(customerId);
+            }
+            
+            return result;
+        } catch (error) {
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                return this.deleteLocalCustomer(customerId);
+            }
+            throw error;
+        }
+    }
+
+    // Vehicle API methods (updated for new schema)
+    async getAllVehicles(customerId = null, dateStart = null, dateEnd = null) {
+        if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
+            return this.getLocalVehicles(customerId, dateStart, dateEnd);
+        }
+
+        try {
+            let endpoint = '/vehicles';
+            const params = new URLSearchParams();
+            
+            if (customerId) params.append('customer_id', customerId);
+            if (dateStart) params.append('date_start', dateStart);
+            if (dateEnd) params.append('date_end', dateEnd);
+            
+            if (params.toString()) {
+                endpoint += '?' + params.toString();
+            }
+            
+            return await this.makeRequest(endpoint);
+        } catch (error) {
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                console.log('Falling back to local storage for vehicles');
+                return this.getLocalVehicles(customerId, dateStart, dateEnd);
+            }
+            throw error;
+        }
+    }
+
+    async searchVehicle(identifier) {
+        if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
+            return this.getLocalVehicleByIdentifier(identifier);
+        }
+
+        try {
+            return await this.makeRequest(`/vehicles/search/${encodeURIComponent(identifier)}`);
         } catch (error) {
             if (error.message.includes('404')) {
-                // 404 is expected for new VINs - don't go offline or retry
+                // 404 is expected for new vehicles - don't go offline or retry
                 return null; // Vehicle not found
             }
             if (CONFIG.ENABLE_OFFLINE_MODE) {
                 console.log('Server error, falling back to local storage');
-                return this.getLocalVehicle(vin);
+                return this.getLocalVehicleByIdentifier(identifier);
+            }
+            throw error;
+        }
+    }
+
+    async getVehicleById(vehicleId) {
+        if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
+            return this.getLocalVehicleById(vehicleId);
+        }
+
+        try {
+            return await this.makeRequest(`/vehicles/id/${vehicleId}`);
+        } catch (error) {
+            if (error.message.includes('404')) {
+                return null; // Vehicle not found
+            }
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                console.log('Server error, falling back to local storage');
+                return this.getLocalVehicleById(vehicleId);
             }
             throw error;
         }
@@ -138,32 +241,58 @@ class VINScannerAPI {
             return result;
         } catch (error) {
             if (CONFIG.ENABLE_OFFLINE_MODE) {
-                console.log('Server unavailable, saving locally');
+                console.log('Server unavailable, saving vehicle locally');
                 return this.saveLocalVehicle(payload);
             }
             throw error;
         }
     }
 
-    async deleteVehicle(vin) {
+    async deleteVehicle(vehicleId) {
         if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
-            return this.deleteLocalVehicle(vin);
+            return this.deleteLocalVehicle(vehicleId);
         }
 
         try {
-            const result = await this.makeRequest(`/vehicles/${vin}`, {
+            const result = await this.makeRequest(`/vehicles/${vehicleId}`, {
                 method: 'DELETE'
             });
             
             // Also delete locally
             if (CONFIG.ENABLE_OFFLINE_MODE) {
-                this.deleteLocalVehicle(vin);
+                this.deleteLocalVehicle(vehicleId);
             }
             
             return result;
         } catch (error) {
             if (CONFIG.ENABLE_OFFLINE_MODE) {
-                return this.deleteLocalVehicle(vin);
+                return this.deleteLocalVehicle(vehicleId);
+            }
+            throw error;
+        }
+    }
+
+    // Export functionality
+    async exportCustomerData(customerId, dateStart = null, dateEnd = null) {
+        if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
+            return this.getLocalExportData(customerId, dateStart, dateEnd);
+        }
+
+        try {
+            const payload = {
+                customer_id: customerId,
+                date_start: dateStart,
+                date_end: dateEnd
+            };
+
+            return await this.makeRequest('/vehicles/export', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        } catch (error) {
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                console.log('Server unavailable, generating local export data');
+                return this.getLocalExportData(customerId, dateStart, dateEnd);
             }
             throw error;
         }
@@ -184,31 +313,125 @@ class VINScannerAPI {
         }
     }
 
-    // Local storage fallback methods
-    getLocalVehicles() {
-        const vehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
-        return vehicles.map(v => ({
-            vin: v.vin,
-            status: v.status,
-            notes: v.notes,
-            date_added: v.dateAdded,
-            last_updated: v.lastUpdated,
-            created_by: v.createdBy || 'local',
-            updated_by: v.updatedBy || 'local'
+    // Local storage fallback methods for customers
+    getLocalCustomers() {
+        const customers = JSON.parse(localStorage.getItem('customers') || '[]');
+        return customers.map((c, index) => ({
+            id: c.id || index + 1,
+            name: c.name,
+            date_added: c.dateAdded || new Date().toISOString(),
+            created_by: c.createdBy || 'local'
         }));
     }
 
-    getLocalVehicle(vin) {
+    saveLocalCustomer(customerData) {
+        const customers = JSON.parse(localStorage.getItem('customers') || '[]');
+        const existingIndex = customers.findIndex(c => c.name.toLowerCase() === customerData.name.toLowerCase());
+        
+        if (existingIndex >= 0) {
+            throw new Error('Customer already exists');
+        }
+
+        const customer = {
+            id: Date.now(), // Simple ID generation for local storage
+            name: customerData.name,
+            dateAdded: new Date().toISOString(),
+            createdBy: customerData.user || 'local'
+        };
+
+        customers.push(customer);
+        localStorage.setItem('customers', JSON.stringify(customers));
+        
+        return { 
+            id: customer.id,
+            name: customer.name,
+            message: 'Customer saved locally'
+        };
+    }
+
+    deleteLocalCustomer(customerId) {
+        const customers = JSON.parse(localStorage.getItem('customers') || '[]');
+        const vehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
+        
+        // Check if customer has vehicles
+        const customerVehicles = vehicles.filter(v => v.customerId == customerId);
+        if (customerVehicles.length > 0) {
+            throw new Error('Cannot delete customer with existing vehicles');
+        }
+        
+        const filteredCustomers = customers.filter(c => c.id != customerId);
+        localStorage.setItem('customers', JSON.stringify(filteredCustomers));
+        return { message: 'Customer deleted locally' };
+    }
+
+    // Local storage fallback methods for vehicles (updated)
+    getLocalVehicles(customerId = null, dateStart = null, dateEnd = null) {
+        const vehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
+        const customers = this.getLocalCustomers();
+        
+        let filteredVehicles = vehicles;
+        
+        if (customerId) {
+            filteredVehicles = filteredVehicles.filter(v => v.customerId == customerId);
+        }
+        
+        if (dateStart) {
+            filteredVehicles = filteredVehicles.filter(v => {
+                const vehicleDate = new Date(v.dateAdded || v.date_added);
+                return vehicleDate >= new Date(dateStart);
+            });
+        }
+        
+        if (dateEnd) {
+            filteredVehicles = filteredVehicles.filter(v => {
+                const vehicleDate = new Date(v.dateAdded || v.date_added);
+                return vehicleDate <= new Date(dateEnd);
+            });
+        }
+        
+        return filteredVehicles.map(v => {
+            const customer = customers.find(c => c.id == v.customerId);
+            return {
+                id: v.id || Date.now(),
+                vin: v.vin || null,
+                repair_order: v.repairOrder || v.repair_order || null,
+                customer_id: v.customerId || v.customer_id,
+                customer_name: customer ? customer.name : 'Unknown Customer',
+                status: v.status,
+                notes: v.notes || '',
+                date_added: v.dateAdded || v.date_added || new Date().toISOString(),
+                last_updated: v.lastUpdated || v.last_updated || new Date().toISOString(),
+                created_by: v.createdBy || v.created_by || 'local',
+                updated_by: v.updatedBy || v.updated_by || 'local'
+            };
+        });
+    }
+
+    getLocalVehicleByIdentifier(identifier) {
         const vehicles = this.getLocalVehicles();
-        return vehicles.find(v => v.vin === vin.toUpperCase()) || null;
+        return vehicles.find(v => 
+            (v.vin && v.vin.toUpperCase() === identifier.toUpperCase()) ||
+            (v.repair_order && v.repair_order.toUpperCase() === identifier.toUpperCase())
+        ) || null;
+    }
+
+    getLocalVehicleById(vehicleId) {
+        const vehicles = this.getLocalVehicles();
+        return vehicles.find(v => v.id == vehicleId) || null;
     }
 
     saveLocalVehicle(vehicleData) {
         const vehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
-        const existingIndex = vehicles.findIndex(v => v.vin === vehicleData.vin);
+        const existingIndex = vehicles.findIndex(v => 
+            (vehicleData.vin && v.vin === vehicleData.vin && v.customerId == vehicleData.customer_id) ||
+            (vehicleData.repair_order && v.repairOrder === vehicleData.repair_order && v.customerId == vehicleData.customer_id)
+        );
         
         const vehicle = {
-            vin: vehicleData.vin.toUpperCase(),
+            id: existingIndex >= 0 ? vehicles[existingIndex].id : Date.now(),
+            vin: vehicleData.vin ? vehicleData.vin.toUpperCase() : null,
+            repairOrder: vehicleData.repair_order || null,
+            customerId: vehicleData.customer_id,
             status: vehicleData.status,
             notes: vehicleData.notes || '',
             lastUpdated: new Date().toISOString(),
@@ -230,19 +453,47 @@ class VINScannerAPI {
         };
     }
 
-    deleteLocalVehicle(vin) {
+    deleteLocalVehicle(vehicleId) {
         const vehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
-        const filteredVehicles = vehicles.filter(v => v.vin !== vin.toUpperCase());
+        const filteredVehicles = vehicles.filter(v => v.id != vehicleId);
         localStorage.setItem('vehicles', JSON.stringify(filteredVehicles));
         return { message: 'Vehicle deleted locally' };
+    }
+
+    getLocalExportData(customerId, dateStart = null, dateEnd = null) {
+        const customers = this.getLocalCustomers();
+        const customer = customers.find(c => c.id == customerId);
+        
+        if (!customer) {
+            throw new Error('Customer not found');
+        }
+        
+        const vehicles = this.getLocalVehicles(customerId, dateStart, dateEnd);
+        
+        return {
+            customer: customer.name,
+            vehicles: vehicles.map(v => ({
+                vin: v.vin,
+                repair_order: v.repair_order,
+                status: v.status,
+                notes: v.notes,
+                date_added: v.date_added,
+                last_updated: v.last_updated
+            })),
+            date_range: {
+                start: dateStart,
+                end: dateEnd
+            },
+            generated_at: new Date().toISOString()
+        };
     }
 
     getLocalStats() {
         const vehicles = this.getLocalVehicles();
         return {
             total: vehicles.length,
-            pre_scan: vehicles.filter(v => v.status === 'pre-scan').length,
-            post_scan: vehicles.filter(v => v.status === 'post-scan').length,
+            'pre-scan': vehicles.filter(v => v.status === 'pre-scan').length,
+            'post-scan': vehicles.filter(v => v.status === 'post-scan').length,
             calibration: vehicles.filter(v => v.status === 'calibration').length,
             completed: vehicles.filter(v => v.status === 'completed').length
         };
@@ -252,19 +503,34 @@ class VINScannerAPI {
     async syncLocalData() {
         if (!this.isOnline) return;
 
+        console.log('Syncing local data to server...');
+        
+        // Sync customers first
+        const localCustomers = JSON.parse(localStorage.getItem('customers') || '[]');
+        for (const customer of localCustomers) {
+            try {
+                await this.addCustomer(customer.name);
+            } catch (error) {
+                console.error('Failed to sync customer:', customer.name, error);
+            }
+        }
+        
+        // Then sync vehicles
         const localVehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
-        console.log(`Syncing ${localVehicles.length} local vehicles to server`);
-
         for (const vehicle of localVehicles) {
             try {
                 await this.saveVehicle({
                     vin: vehicle.vin,
+                    repair_order: vehicle.repairOrder,
+                    customer_id: vehicle.customerId,
                     status: vehicle.status,
                     notes: vehicle.notes
                 });
             } catch (error) {
-                console.error('Failed to sync vehicle:', vehicle.vin, error);
+                console.error('Failed to sync vehicle:', vehicle.vin || vehicle.repairOrder, error);
             }
         }
+        
+        console.log('Local data sync completed');
     }
 }

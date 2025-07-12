@@ -6,8 +6,11 @@ class VINScanner {
         this.stream = null;
         this.api = new VINScannerAPI();
         this.vehicles = [];
+        this.customers = [];
+        this.currentCustomerFilter = null;
         
         this.initEventListeners();
+        this.loadCustomers();
         this.loadVehicleList();
         this.setupAutoRefresh();
     }
@@ -17,8 +20,13 @@ class VINScanner {
         document.getElementById('stopCamera').addEventListener('click', () => this.stopCamera());
         document.getElementById('captureBtn').addEventListener('click', () => this.captureAndProcess());
         document.getElementById('manualEntryBtn').addEventListener('click', () => this.showManualEntry());
-        document.getElementById('vinInput').addEventListener('input', (e) => this.checkDuplicate(e.target.value));
-        document.getElementById('searchInput').addEventListener('input', (e) => this.filterVehicles(e.target.value));
+        document.getElementById('vinInput').addEventListener('input', (e) => this.checkDuplicate());
+        document.getElementById('roInput').addEventListener('input', (e) => this.checkDuplicate());
+        document.getElementById('searchInput').addEventListener('input', (e) => this.searchVehicles(e.target.value));
+        document.getElementById('customerFilter').addEventListener('change', (e) => this.updateExportButton());
+        document.getElementById('newCustomerName').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.addCustomer();
+        });
     }
 
     async startCamera() {
@@ -56,36 +64,30 @@ class VINScanner {
     }
 
     async captureAndProcess() {
-        // Set canvas to video dimensions
         this.canvas.width = this.video.videoWidth;
         this.canvas.height = this.video.videoHeight;
         this.ctx.drawImage(this.video, 0, 0);
         
-        // Calculate crop area (the blue overlay box)
         const videoRect = this.video.getBoundingClientRect();
         const scaleX = this.video.videoWidth / videoRect.width;
         const scaleY = this.video.videoHeight / videoRect.height;
         
-        // Blue box is 80% width, 60px height, centered
         const cropWidth = this.video.videoWidth * 0.8;
         const cropHeight = 60 * scaleY;
         const cropX = (this.video.videoWidth - cropWidth) / 2;
         const cropY = (this.video.videoHeight - cropHeight) / 2;
         
-        // Create cropped canvas
         const croppedCanvas = document.createElement('canvas');
         const croppedCtx = croppedCanvas.getContext('2d');
         croppedCanvas.width = cropWidth;
         croppedCanvas.height = cropHeight;
         
-        // Draw cropped area
         croppedCtx.drawImage(
             this.canvas,
             cropX, cropY, cropWidth, cropHeight,
             0, 0, cropWidth, cropHeight
         );
         
-        // Enhance the image for better OCR
         this.enhanceImage(croppedCtx, cropWidth, cropHeight);
         
         const imageData = croppedCanvas.toDataURL('image/jpeg', 0.9);
@@ -106,35 +108,25 @@ class VINScanner {
     }
 
     enhanceImage(ctx, width, height) {
-        // Get image data
         const imageData = ctx.getImageData(0, 0, width, height);
         const data = imageData.data;
         
-        // Increase contrast and convert to grayscale
         for (let i = 0; i < data.length; i += 4) {
-            // Convert to grayscale
             const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            
-            // Increase contrast
             const contrast = 1.5;
             const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
             const enhanced = factor * (gray - 128) + 128;
-            
-            // Apply thresholding for better text recognition
             const threshold = enhanced > 128 ? 255 : 0;
             
-            data[i] = threshold;     // Red
-            data[i + 1] = threshold; // Green
-            data[i + 2] = threshold; // Blue
-            // Alpha stays the same
+            data[i] = threshold;
+            data[i + 1] = threshold;
+            data[i + 2] = threshold;
         }
         
-        // Put enhanced image back
         ctx.putImageData(imageData, 0, 0);
     }
 
     async processVIN(imageData) {
-        // Try multiple OCR approaches
         const approaches = [
             {
                 name: 'Standard',
@@ -189,11 +181,9 @@ class VINScanner {
     }
 
     extractVIN(text) {
-        // Clean the text first
         const cleanText = text.replace(/[^A-HJ-NPR-Z0-9]/g, '');
         console.log('Cleaned text:', cleanText);
         
-        // Look for 17-character sequences
         const vinPattern = /[A-HJ-NPR-Z0-9]{17}/g;
         const matches = cleanText.match(vinPattern);
         
@@ -201,7 +191,6 @@ class VINScanner {
             return matches[0];
         }
         
-        // Fallback: look for any sequence that could be a partial VIN (14+ chars)
         const partialPattern = /[A-HJ-NPR-Z0-9]{14,17}/g;
         const partialMatches = cleanText.match(partialPattern);
         
@@ -212,102 +201,123 @@ class VINScanner {
         return null;
     }
 
-    cleanVIN(vin) {
-        return vin.replace(/[^A-HJ-NPR-Z0-9]/g, '').substring(0, 17);
-    }
-
     showManualEntry() {
         document.getElementById('vinInput').value = '';
+        document.getElementById('roInput').value = '';
         document.getElementById('vinResult').classList.remove('d-none');
         document.getElementById('vinInput').focus();
         
-        // Update the card title
-        document.querySelector('#vinResult .card-title').textContent = 'Manual VIN Entry';
+        document.querySelector('#vinResult .card-title').textContent = 'Manual Entry';
     }
 
     displayResult(detectedVIN) {
         document.getElementById('vinInput').value = detectedVIN;
+        document.getElementById('roInput').value = '';
         document.getElementById('vinResult').classList.remove('d-none');
         
-        // Update the card title
-        document.querySelector('#vinResult .card-title').textContent = detectedVIN ? 'Detected VIN' : 'Manual VIN Entry';
+        document.querySelector('#vinResult .card-title').textContent = detectedVIN ? 'Detected VIN' : 'Manual Entry';
         
         if (!detectedVIN) {
             document.getElementById('vinFeedback').textContent = 'No VIN detected. Please enter manually.';
             document.getElementById('vinFeedback').className = 'form-text text-warning';
         } else {
-            this.checkDuplicate(detectedVIN);
+            this.checkDuplicate();
         }
         
         document.getElementById('vinInput').focus();
     }
 
-    async checkDuplicate(vin) {
-        const cleanVin = vin.toUpperCase().trim();
+    async checkDuplicate() {
+        const vin = document.getElementById('vinInput').value.toUpperCase().trim();
+        const ro = document.getElementById('roInput').value.trim();
         const feedback = document.getElementById('vinFeedback');
         
-        if (cleanVin.length < 17) {
-            feedback.textContent = `VIN must be 17 characters (currently ${cleanVin.length})`;
+        if (!vin && !ro) {
+            feedback.textContent = 'Enter either VIN or Repair Order (or both)';
             feedback.className = 'form-text text-muted';
             return;
         }
         
-        if (cleanVin.length === 17) {
-            try {
-                const existing = await this.api.getVehicleByVIN(cleanVin);
+        if (vin && vin.length < 17) {
+            feedback.textContent = `VIN must be 17 characters (currently ${vin.length})`;
+            feedback.className = 'form-text text-muted';
+            return;
+        }
+        
+        const identifier = vin || ro;
+        if (!identifier) return;
+        
+        try {
+            const existing = await this.api.searchVehicle(identifier);
+            
+            if (existing) {
+                const lastUpdated = new Date(existing.last_updated).toLocaleDateString();
+                feedback.innerHTML = `⚠️ <strong>DUPLICATE!</strong> Found in system:<br>Customer: ${existing.customer_name}<br>Status: <span class="status-badge status-${existing.status}">${existing.status.replace('-', ' ')}</span><br>Last updated: ${lastUpdated}`;
+                feedback.className = 'form-text text-danger';
                 
-                if (existing) {
-                    const lastUpdated = new Date(existing.last_updated).toLocaleDateString();
-                    feedback.innerHTML = `⚠️ <strong>DUPLICATE!</strong> This VIN already exists with status: <span class="status-badge status-${existing.status}">${existing.status.replace('-', ' ')}</span><br>Last updated: ${lastUpdated}`;
-                    feedback.className = 'form-text text-danger';
-                    
-                    // Pre-fill the existing data
-                    document.getElementById('statusSelect').value = existing.status;
-                    document.getElementById('notesInput').value = existing.notes || '';
-                } else {
-                    feedback.textContent = '✅ New VIN - ready to save';
-                    feedback.className = 'form-text text-success';
-                }
-            } catch (error) {
-                console.error('Error checking duplicate:', error);
-                feedback.textContent = 'Unable to check for duplicates - proceeding';
-                feedback.className = 'form-text text-warning';
+                // Pre-fill existing data
+                document.getElementById('customerSelect').value = existing.customer_id;
+                document.getElementById('statusSelect').value = existing.status;
+                document.getElementById('notesInput').value = existing.notes || '';
+                if (existing.vin) document.getElementById('vinInput').value = existing.vin;
+                if (existing.repair_order) document.getElementById('roInput').value = existing.repair_order;
+            } else {
+                feedback.textContent = '✅ New entry - ready to save';
+                feedback.className = 'form-text text-success';
             }
+        } catch (error) {
+            console.error('Error checking duplicate:', error);
+            feedback.textContent = 'Unable to check for duplicates - proceeding';
+            feedback.className = 'form-text text-warning';
         }
     }
 
     resetScan() {
         document.getElementById('vinResult').classList.add('d-none');
         document.getElementById('vinInput').value = '';
+        document.getElementById('roInput').value = '';
         document.getElementById('notesInput').value = '';
         document.getElementById('statusSelect').value = 'pre-scan';
+        document.getElementById('customerSelect').value = '';
     }
 
     async saveVehicle() {
         const vin = document.getElementById('vinInput').value.trim();
+        const ro = document.getElementById('roInput').value.trim();
+        const customerId = document.getElementById('customerSelect').value;
         const status = document.getElementById('statusSelect').value;
         const notes = document.getElementById('notesInput').value.trim();
         
-        if (!vin || vin.length !== 17) {
-            alert('Please enter a valid 17-character VIN.');
+        if (!vin && !ro) {
+            alert('Please enter either a VIN or Repair Order number.');
+            return;
+        }
+        
+        if (vin && vin.length !== 17) {
+            alert('VIN must be exactly 17 characters.');
+            return;
+        }
+        
+        if (!customerId) {
+            alert('Please select a customer.');
             return;
         }
         
         try {
-            // Disable save button to prevent double-clicks
             const saveBtn = document.querySelector('button[onclick="saveVehicle()"]');
             saveBtn.disabled = true;
             saveBtn.textContent = 'Saving...';
             
             const result = await this.api.saveVehicle({
-                vin: vin.toUpperCase(),
+                vin: vin || null,
+                repair_order: ro || null,
+                customer_id: customerId,
                 status: status,
                 notes: notes
             });
             
             const message = result.action === 'updated' ? 'Vehicle updated successfully!' : 'Vehicle saved successfully!';
             
-            // Show connection status
             if (!this.api.isOnline) {
                 alert(message + ' (Saved locally - will sync when server is available)');
             } else {
@@ -321,11 +331,41 @@ class VINScanner {
             console.error('Error saving vehicle:', error);
             alert('Error saving vehicle. Please try again.');
         } finally {
-            // Re-enable save button
             const saveBtn = document.querySelector('button[onclick="saveVehicle()"]');
             saveBtn.disabled = false;
             saveBtn.textContent = 'Save Vehicle';
         }
+    }
+
+    async loadCustomers() {
+        try {
+            this.customers = await this.api.getAllCustomers();
+            this.populateCustomerSelects();
+        } catch (error) {
+            console.error('Error loading customers:', error);
+        }
+    }
+
+    populateCustomerSelects() {
+        const selects = ['customerSelect', 'customerFilter'];
+        
+        selects.forEach(selectId => {
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            
+            // Clear existing options (except first)
+            while (select.children.length > 1) {
+                select.removeChild(select.lastChild);
+            }
+            
+            // Add customer options
+            this.customers.forEach(customer => {
+                const option = document.createElement('option');
+                option.value = customer.id;
+                option.textContent = customer.name;
+                select.appendChild(option);
+            });
+        });
     }
 
     async loadVehicleList() {
@@ -333,23 +373,24 @@ class VINScanner {
         container.innerHTML = '<div class="col-12"><p class="text-muted text-center">Loading vehicles...</p></div>';
         
         try {
-            this.vehicles = await this.api.getAllVehicles();
+            const customerId = document.getElementById('customerFilter')?.value || null;
+            const dateStart = document.getElementById('dateStart')?.value || null;
+            const dateEnd = document.getElementById('dateEnd')?.value || null;
+            
+            this.vehicles = await this.api.getAllVehicles(customerId, dateStart, dateEnd);
             
             container.innerHTML = '';
             
             if (this.vehicles.length === 0) {
-                container.innerHTML = '<div class="col-12"><p class="text-muted text-center">No vehicles scanned yet.</p></div>';
+                container.innerHTML = '<div class="col-12"><p class="text-muted text-center">No vehicles found.</p></div>';
                 return;
             }
             
-            this.vehicles
-                .sort((a, b) => new Date(b.last_updated) - new Date(a.last_updated))
-                .forEach(vehicle => {
-                    const card = this.createVehicleCard(vehicle);
-                    container.appendChild(card);
-                });
+            this.vehicles.forEach(vehicle => {
+                const card = this.createVehicleCard(vehicle);
+                container.appendChild(card);
+            });
                 
-            // Show connection status
             this.updateConnectionStatus();
             
         } catch (error) {
@@ -365,19 +406,25 @@ class VINScanner {
         const statusClass = `status-${vehicle.status}`;
         const statusText = vehicle.status.charAt(0).toUpperCase() + vehicle.status.slice(1).replace('-', ' ');
         
+        const identifier = vehicle.vin || vehicle.repair_order || 'No ID';
+        const identifierType = vehicle.vin ? 'VIN' : 'RO';
+        
         col.innerHTML = `
             <div class="card">
                 <div class="card-body">
-                    <h5 class="card-title">${vehicle.vin}</h5>
+                    <h5 class="card-title">${identifier}</h5>
                     <p class="card-text">
+                        <strong>Customer:</strong> ${vehicle.customer_name}<br>
+                        <strong>Type:</strong> ${identifierType}<br>
                         <span class="status-badge ${statusClass}">${statusText}</span>
                     </p>
                     ${vehicle.notes ? `<p class="card-text">${vehicle.notes}</p>` : ''}
+                    ${vehicle.vin && vehicle.repair_order ? `<p class="card-text"><small class="text-muted">VIN: ${vehicle.vin}<br>RO: ${vehicle.repair_order}</small></p>` : ''}
                     <p class="card-text">
                         <small class="text-muted">Updated: ${new Date(vehicle.last_updated).toLocaleDateString()}</small>
                     </p>
-                    <button class="btn btn-sm btn-outline-primary" onclick="editVehicle('${vehicle.vin}')">Edit</button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle('${vehicle.vin}')">Delete</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="editVehicle(${vehicle.id})">Edit</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteVehicle(${vehicle.id})">Delete</button>
                 </div>
             </div>
         `;
@@ -385,11 +432,14 @@ class VINScanner {
         return col;
     }
 
-    filterVehicles(searchTerm) {
-        const filteredVehicles = this.vehicles.filter(vehicle => 
-            vehicle.vin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            vehicle.notes.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+    searchVehicles(searchTerm) {
+        const filteredVehicles = this.vehicles.filter(vehicle => {
+            const searchLower = searchTerm.toLowerCase();
+            return (vehicle.vin && vehicle.vin.toLowerCase().includes(searchLower)) ||
+                   (vehicle.repair_order && vehicle.repair_order.toLowerCase().includes(searchLower)) ||
+                   (vehicle.customer_name && vehicle.customer_name.toLowerCase().includes(searchLower)) ||
+                   (vehicle.notes && vehicle.notes.toLowerCase().includes(searchLower));
+        });
         
         const container = document.getElementById('vehicleList');
         container.innerHTML = '';
@@ -405,17 +455,93 @@ class VINScanner {
         });
     }
 
+    async loadCustomerList() {
+        const container = document.getElementById('customerList');
+        container.innerHTML = '<div class="col-12"><p class="text-muted text-center">Loading customers...</p></div>';
+        
+        try {
+            await this.loadCustomers();
+            
+            container.innerHTML = '';
+            
+            if (this.customers.length === 0) {
+                container.innerHTML = '<div class="col-12"><p class="text-muted text-center">No customers found.</p></div>';
+                return;
+            }
+            
+            this.customers.forEach(customer => {
+                const card = this.createCustomerCard(customer);
+                container.appendChild(card);
+            });
+            
+        } catch (error) {
+            console.error('Error loading customers:', error);
+            container.innerHTML = '<div class="col-12"><p class="text-danger text-center">Error loading customers. Please refresh.</p></div>';
+        }
+    }
+
+    createCustomerCard(customer) {
+        const col = document.createElement('div');
+        col.className = 'col-md-6 col-lg-4 mb-3';
+        
+        col.innerHTML = `
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">${customer.name}</h5>
+                    <p class="card-text">
+                        <small class="text-muted">Added: ${new Date(customer.date_added).toLocaleDateString()}</small>
+                    </p>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${customer.id})">Delete</button>
+                </div>
+            </div>
+        `;
+        
+        return col;
+    }
+
+    async addCustomer() {
+        const name = document.getElementById('newCustomerName').value.trim();
+        
+        if (!name) {
+            alert('Please enter a customer name.');
+            return;
+        }
+        
+        try {
+            await this.api.addCustomer(name);
+            document.getElementById('newCustomerName').value = '';
+            await this.loadCustomers();
+            await this.loadCustomerList();
+            alert('Customer added successfully!');
+        } catch (error) {
+            console.error('Error adding customer:', error);
+            alert('Error adding customer. Customer may already exist.');
+        }
+    }
+
+    updateExportButton() {
+        const exportBtn = document.getElementById('exportBtn');
+        const customerId = document.getElementById('customerFilter').value;
+        
+        if (customerId) {
+            exportBtn.disabled = false;
+            const customerName = this.customers.find(c => c.id == customerId)?.name || 'Selected Customer';
+            exportBtn.textContent = `Export ${customerName}`;
+        } else {
+            exportBtn.disabled = true;
+            exportBtn.textContent = 'Export Selected Customer';
+        }
+    }
+
     setupAutoRefresh() {
         setInterval(async () => {
-            if (document.getElementById('vehicleListView').classList.contains('d-none')) {
-                return; // Don't refresh if not viewing vehicle list
+            if (!document.getElementById('vehicleListView').classList.contains('d-none')) {
+                await this.loadVehicleList();
             }
-            await this.loadVehicleList();
         }, CONFIG.AUTO_REFRESH_INTERVAL);
     }
 
     updateConnectionStatus() {
-        // Add a connection status indicator to the navbar
         let statusIndicator = document.getElementById('connectionStatus');
         if (!statusIndicator) {
             statusIndicator = document.createElement('span');
@@ -432,32 +558,51 @@ class VINScanner {
     }
 }
 
+// Navigation functions
 function showScanView() {
     document.getElementById('scanView').classList.remove('d-none');
     document.getElementById('vehicleListView').classList.add('d-none');
+    document.getElementById('customerView').classList.add('d-none');
 }
 
 function showVehicleList() {
     document.getElementById('scanView').classList.add('d-none');
     document.getElementById('vehicleListView').classList.remove('d-none');
+    document.getElementById('customerView').classList.add('d-none');
     scanner.loadVehicleList();
 }
 
-function editVehicle(vin) {
-    const vehicle = scanner.vehicles.find(v => v.vin === vin);
-    if (vehicle) {
-        document.getElementById('vinInput').value = vehicle.vin;
-        document.getElementById('statusSelect').value = vehicle.status;
-        document.getElementById('notesInput').value = vehicle.notes;
-        document.getElementById('vinResult').classList.remove('d-none');
-        showScanView();
+function showCustomerView() {
+    document.getElementById('scanView').classList.add('d-none');
+    document.getElementById('vehicleListView').classList.add('d-none');
+    document.getElementById('customerView').classList.remove('d-none');
+    scanner.loadCustomerList();
+}
+
+// Vehicle management functions
+async function editVehicle(vehicleId) {
+    try {
+        const vehicle = await scanner.api.getVehicleById(vehicleId);
+        if (vehicle) {
+            document.getElementById('customerSelect').value = vehicle.customer_id;
+            document.getElementById('vinInput').value = vehicle.vin || '';
+            document.getElementById('roInput').value = vehicle.repair_order || '';
+            document.getElementById('statusSelect').value = vehicle.status;
+            document.getElementById('notesInput').value = vehicle.notes || '';
+            document.getElementById('vinResult').classList.remove('d-none');
+            document.querySelector('#vinResult .card-title').textContent = 'Edit Vehicle';
+            showScanView();
+        }
+    } catch (error) {
+        console.error('Error loading vehicle for edit:', error);
+        alert('Error loading vehicle data.');
     }
 }
 
-async function deleteVehicle(vin) {
+async function deleteVehicle(vehicleId) {
     if (confirm('Are you sure you want to delete this vehicle?')) {
         try {
-            await scanner.api.deleteVehicle(vin);
+            await scanner.api.deleteVehicle(vehicleId);
             await scanner.loadVehicleList();
             alert('Vehicle deleted successfully!');
         } catch (error) {
@@ -467,6 +612,102 @@ async function deleteVehicle(vin) {
     }
 }
 
+// Customer management functions
+async function deleteCustomer(customerId) {
+    if (confirm('Are you sure you want to delete this customer? This will only work if they have no vehicles.')) {
+        try {
+            await scanner.api.deleteCustomer(customerId);
+            await scanner.loadCustomers();
+            await scanner.loadCustomerList();
+            alert('Customer deleted successfully!');
+        } catch (error) {
+            console.error('Error deleting customer:', error);
+            alert('Error deleting customer. They may have existing vehicles.');
+        }
+    }
+}
+
+function addCustomer() {
+    scanner.addCustomer();
+}
+
+function showAddCustomer() {
+    const name = prompt('Enter customer name:');
+    if (name && name.trim()) {
+        scanner.api.addCustomer(name.trim()).then(() => {
+            scanner.loadCustomers();
+            alert('Customer added successfully!');
+        }).catch(error => {
+            console.error('Error adding customer:', error);
+            alert('Error adding customer. Customer may already exist.');
+        });
+    }
+}
+
+// Filtering and export functions
+function filterVehicles() {
+    scanner.loadVehicleList();
+}
+
+async function exportCustomerData() {
+    const customerId = document.getElementById('customerFilter').value;
+    const dateStart = document.getElementById('dateStart').value;
+    const dateEnd = document.getElementById('dateEnd').value;
+    
+    if (!customerId) {
+        alert('Please select a customer to export.');
+        return;
+    }
+    
+    try {
+        const exportData = await scanner.api.exportCustomerData(customerId, dateStart, dateEnd);
+        
+        // Create downloadable content
+        let content = `Vehicle Report for ${exportData.customer}\n`;
+        content += `Generated: ${new Date(exportData.generated_at).toLocaleString()}\n`;
+        if (exportData.date_range.start || exportData.date_range.end) {
+            content += `Date Range: ${exportData.date_range.start || 'Beginning'} to ${exportData.date_range.end || 'End'}\n`;
+        }
+        content += `\n`;
+        
+        if (exportData.vehicles.length === 0) {
+            content += 'No vehicles found for this customer in the specified date range.\n';
+        } else {
+            content += `Total Vehicles: ${exportData.vehicles.length}\n\n`;
+            
+            exportData.vehicles.forEach((vehicle, index) => {
+                content += `${index + 1}. `;
+                if (vehicle.vin) content += `VIN: ${vehicle.vin}`;
+                if (vehicle.vin && vehicle.repair_order) content += ` | `;
+                if (vehicle.repair_order) content += `RO: ${vehicle.repair_order}`;
+                content += `\n   Status: ${vehicle.status.replace('-', ' ').toUpperCase()}`;
+                content += `\n   Date Added: ${new Date(vehicle.date_added).toLocaleDateString()}`;
+                content += `\n   Last Updated: ${new Date(vehicle.last_updated).toLocaleDateString()}`;
+                if (vehicle.notes) content += `\n   Notes: ${vehicle.notes}`;
+                content += `\n\n`;
+            });
+        }
+        
+        // Create and download file
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${exportData.customer.replace(/[^a-z0-9]/gi, '_')}_vehicle_report_${new Date().toISOString().split('T')[0]}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        alert('Vehicle report downloaded successfully!');
+        
+    } catch (error) {
+        console.error('Error exporting customer data:', error);
+        alert('Error generating report. Please try again.');
+    }
+}
+
+// Utility functions
 function saveVehicle() {
     scanner.saveVehicle();
 }
@@ -475,4 +716,5 @@ function resetScan() {
     scanner.resetScan();
 }
 
+// Initialize the scanner
 const scanner = new VINScanner();
