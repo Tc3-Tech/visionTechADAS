@@ -49,6 +49,10 @@ class VINScannerAPI {
             clearTimeout(timeoutId);
             
             if (!response.ok) {
+                // Don't mark as offline for 404 (not found) - that's a valid response
+                if (response.status !== 404) {
+                    this.isOnline = false;
+                }
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
             
