@@ -32,8 +32,10 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-admin@visiontechadas.duckdns.org}
     volumes:
-      - certbot_certs:/etc/letsencrypt:ro
+      - letsencrypt_data:/etc/letsencrypt
       - certbot_webroot:/var/www/certbot
     depends_on:
       - vin-scanner-api
@@ -44,7 +46,7 @@ services:
 volumes:
   vin_data:
     driver: local
-  certbot_certs:
+  letsencrypt_data:
     driver: local
   certbot_webroot:
     driver: local
