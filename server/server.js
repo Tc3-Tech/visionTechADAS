@@ -14,10 +14,16 @@ app.use(helmet());
 // Note: CORS handled by reverse proxy (Caddy)
 app.use(express.json());
 
-// Rate limiting
+// Rate limiting - more generous for development/testing
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 500, // increased from 100 to 500 requests per windowMs
+  message: {
+    error: 'Too many requests from this IP, please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 app.use('/api/', limiter);
 

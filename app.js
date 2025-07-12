@@ -8,6 +8,8 @@ class VINScanner {
         this.vehicles = [];
         this.customers = [];
         this.currentCustomerFilter = null;
+        this.loadingVehicles = false;
+        this.loadingCustomers = false;
         
         this.initEventListeners();
         this.loadCustomers();
@@ -338,11 +340,16 @@ class VINScanner {
     }
 
     async loadCustomers() {
+        if (this.loadingCustomers) return; // Prevent duplicate requests
+        
         try {
+            this.loadingCustomers = true;
             this.customers = await this.api.getAllCustomers();
             this.populateCustomerSelects();
         } catch (error) {
             console.error('Error loading customers:', error);
+        } finally {
+            this.loadingCustomers = false;
         }
     }
 
@@ -369,10 +376,13 @@ class VINScanner {
     }
 
     async loadVehicleList() {
+        if (this.loadingVehicles) return; // Prevent duplicate requests
+        
         const container = document.getElementById('vehicleList');
         container.innerHTML = '<div class="col-12"><p class="text-muted text-center">Loading vehicles...</p></div>';
         
         try {
+            this.loadingVehicles = true;
             const customerId = document.getElementById('customerFilter')?.value || null;
             const dateStart = document.getElementById('dateStart')?.value || null;
             const dateEnd = document.getElementById('dateEnd')?.value || null;
@@ -396,6 +406,8 @@ class VINScanner {
         } catch (error) {
             console.error('Error loading vehicles:', error);
             container.innerHTML = '<div class="col-12"><p class="text-danger text-center">Error loading vehicles. Please refresh.</p></div>';
+        } finally {
+            this.loadingVehicles = false;
         }
     }
 

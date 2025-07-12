@@ -12,8 +12,8 @@ const CONFIG = {
     USER_ID: 'user_' + Math.random().toString(36).substr(2, 9),
     
     // App settings
-    AUTO_REFRESH_INTERVAL: 30000, // 30 seconds
-    MAX_RETRY_ATTEMPTS: 3,
+    AUTO_REFRESH_INTERVAL: 60000, // 60 seconds (reduced frequency)
+    MAX_RETRY_ATTEMPTS: 2, // reduced from 3 to 2
     REQUEST_TIMEOUT: 10000 // 10 seconds
 };
 
