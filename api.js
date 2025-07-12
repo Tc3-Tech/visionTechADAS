@@ -11,10 +11,15 @@ class VINScannerAPI {
 
     async testConnection() {
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT);
+            
             const response = await fetch(`${this.baseURL.replace('/api', '')}/health`, {
                 method: 'GET',
-                timeout: CONFIG.REQUEST_TIMEOUT
+                signal: controller.signal
             });
+            
+            clearTimeout(timeoutId);
             this.isOnline = response.ok;
             console.log('Server connection:', this.isOnline ? 'Online' : 'Offline');
         } catch (error) {
@@ -28,12 +33,20 @@ class VINScannerAPI {
         const defaultOptions = {
             headers: {
                 'Content-Type': 'application/json',
-            },
-            timeout: CONFIG.REQUEST_TIMEOUT
+            }
         };
 
         try {
-            const response = await fetch(url, { ...defaultOptions, ...options });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT);
+            
+            const response = await fetch(url, { 
+                ...defaultOptions, 
+                ...options,
+                signal: controller.signal 
+            });
+            
+            clearTimeout(timeoutId);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
