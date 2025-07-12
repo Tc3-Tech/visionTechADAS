@@ -14,6 +14,8 @@ class VINScanner {
         document.getElementById('startCamera').addEventListener('click', () => this.startCamera());
         document.getElementById('stopCamera').addEventListener('click', () => this.stopCamera());
         document.getElementById('captureBtn').addEventListener('click', () => this.captureAndProcess());
+        document.getElementById('manualEntryBtn').addEventListener('click', () => this.showManualEntry());
+        document.getElementById('vinInput').addEventListener('input', (e) => this.checkDuplicate(e.target.value));
         document.getElementById('searchInput').addEventListener('input', (e) => this.filterVehicles(e.target.value));
     }
 
@@ -130,16 +132,61 @@ class VINScanner {
     }
 
     async processVIN(imageData) {
-        const { data: { text } } = await Tesseract.recognize(imageData, 'eng', {
-            logger: m => console.log(m),
-            tessedit_char_whitelist: 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',
-            tessedit_pageseg_mode: Tesseract.PSM.SINGLE_TEXT_LINE,
-            tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY,
-            preserve_interword_spaces: '0'
-        });
+        // Try multiple OCR approaches
+        const approaches = [
+            {
+                name: 'Standard',
+                config: {
+                    tessedit_char_whitelist: 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',
+                    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_TEXT_LINE,
+                    tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY,
+                    preserve_interword_spaces: '0'
+                }
+            },
+            {
+                name: 'Block mode',
+                config: {
+                    tessedit_char_whitelist: 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',
+                    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+                    tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY,
+                    preserve_interword_spaces: '0'
+                }
+            },
+            {
+                name: 'Auto mode',
+                config: {
+                    tessedit_char_whitelist: 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789',
+                    tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+                    preserve_interword_spaces: '0'
+                }
+            }
+        ];
+
+        for (const approach of approaches) {
+            console.log(`Trying OCR approach: ${approach.name}`);
+            
+            try {
+                const { data: { text } } = await Tesseract.recognize(imageData, 'eng', {
+                    logger: m => console.log(m),
+                    ...approach.config
+                });
+                
+                console.log(`${approach.name} OCR Raw text:`, text);
+                
+                const result = this.extractVIN(text);
+                if (result) {
+                    console.log(`${approach.name} found VIN:`, result);
+                    return result;
+                }
+            } catch (error) {
+                console.error(`${approach.name} OCR failed:`, error);
+            }
+        }
         
-        console.log('OCR Raw text:', text);
-        
+        return '';
+    }
+
+    extractVIN(text) {
         // Clean the text first
         const cleanText = text.replace(/[^A-HJ-NPR-Z0-9]/g, '');
         console.log('Cleaned text:', cleanText);
@@ -149,32 +196,74 @@ class VINScanner {
         const matches = cleanText.match(vinPattern);
         
         if (matches && matches.length > 0) {
-            console.log('Found VIN:', matches[0]);
             return matches[0];
         }
         
-        // Fallback: look for any sequence that could be a partial VIN
-        const partialPattern = /[A-HJ-NPR-Z0-9]{10,17}/g;
+        // Fallback: look for any sequence that could be a partial VIN (14+ chars)
+        const partialPattern = /[A-HJ-NPR-Z0-9]{14,17}/g;
         const partialMatches = cleanText.match(partialPattern);
         
         if (partialMatches && partialMatches.length > 0) {
-            console.log('Found partial VIN:', partialMatches[0]);
             return partialMatches[0];
         }
         
-        return '';
+        return null;
     }
 
     cleanVIN(vin) {
         return vin.replace(/[^A-HJ-NPR-Z0-9]/g, '').substring(0, 17);
     }
 
+    showManualEntry() {
+        document.getElementById('vinInput').value = '';
+        document.getElementById('vinResult').classList.remove('d-none');
+        document.getElementById('vinInput').focus();
+        
+        // Update the card title
+        document.querySelector('#vinResult .card-title').textContent = 'Manual VIN Entry';
+    }
+
     displayResult(detectedVIN) {
         document.getElementById('vinInput').value = detectedVIN;
         document.getElementById('vinResult').classList.remove('d-none');
         
+        // Update the card title
+        document.querySelector('#vinResult .card-title').textContent = detectedVIN ? 'Detected VIN' : 'Manual VIN Entry';
+        
         if (!detectedVIN) {
-            alert('No VIN detected. Please enter manually or try again.');
+            document.getElementById('vinFeedback').textContent = 'No VIN detected. Please enter manually.';
+            document.getElementById('vinFeedback').className = 'form-text text-warning';
+        } else {
+            this.checkDuplicate(detectedVIN);
+        }
+        
+        document.getElementById('vinInput').focus();
+    }
+
+    checkDuplicate(vin) {
+        const cleanVin = vin.toUpperCase().trim();
+        const feedback = document.getElementById('vinFeedback');
+        
+        if (cleanVin.length < 17) {
+            feedback.textContent = `VIN must be 17 characters (currently ${cleanVin.length})`;
+            feedback.className = 'form-text text-muted';
+            return;
+        }
+        
+        if (cleanVin.length === 17) {
+            const existing = this.vehicles.find(v => v.vin === cleanVin);
+            
+            if (existing) {
+                feedback.innerHTML = `⚠️ <strong>DUPLICATE!</strong> This VIN already exists with status: <span class="status-badge status-${existing.status}">${existing.status.replace('-', ' ')}</span><br>Last updated: ${new Date(existing.lastUpdated).toLocaleDateString()}`;
+                feedback.className = 'form-text text-danger';
+                
+                // Pre-fill the existing data
+                document.getElementById('statusSelect').value = existing.status;
+                document.getElementById('notesInput').value = existing.notes;
+            } else {
+                feedback.textContent = '✅ New VIN - ready to save';
+                feedback.className = 'form-text text-success';
+            }
         }
     }
 

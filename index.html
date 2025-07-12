@@ -93,13 +93,17 @@
                         <button id="stopCamera" class="btn btn-secondary" disabled>Stop Camera</button>
                     </div>
                     
+                    <div class="text-center mb-3">
+                        <button id="manualEntryBtn" class="btn btn-outline-primary">Manual VIN Entry</button>
+                    </div>
+                    
                     <div id="vinResult" class="card d-none">
                         <div class="card-body">
                             <h5 class="card-title">Detected VIN</h5>
                             <div class="mb-3">
                                 <label for="vinInput" class="form-label">VIN Number</label>
-                                <input type="text" class="form-control" id="vinInput" maxlength="17">
-                                <div class="form-text">Verify and correct if needed</div>
+                                <input type="text" class="form-control" id="vinInput" maxlength="17" style="text-transform: uppercase;">
+                                <div id="vinFeedback" class="form-text">Verify and correct if needed</div>
                             </div>
                             <div class="mb-3">
                                 <label for="statusSelect" class="form-label">Work Status</label>
