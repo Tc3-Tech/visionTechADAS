@@ -10,6 +10,7 @@ class VINScanner {
         this.currentCustomerFilter = null;
         this.loadingVehicles = false;
         this.loadingCustomers = false;
+        this.editingVehicleId = null; // Track if we're editing an existing vehicle
         
         this.initEventListeners();
         this.loadCustomers();
@@ -204,15 +205,25 @@ class VINScanner {
     }
 
     showManualEntry() {
+        this.editingVehicleId = null; // Clear edit mode
         document.getElementById('vinInput').value = '';
         document.getElementById('roInput').value = '';
+        document.getElementById('customerSelect').value = '';
+        document.getElementById('statusSelect').value = 'pre-scan';
+        document.getElementById('notesInput').value = '';
         document.getElementById('vinResult').classList.remove('d-none');
         document.getElementById('vinInput').focus();
         
         document.querySelector('#vinResult .card-title').textContent = 'Manual Entry';
+        
+        // Clear feedback
+        const feedback = document.getElementById('vinFeedback');
+        feedback.textContent = 'Enter either VIN or Repair Order (or both)';
+        feedback.className = 'form-text text-muted';
     }
 
     displayResult(detectedVIN) {
+        this.editingVehicleId = null; // Clear edit mode for new scan
         document.getElementById('vinInput').value = detectedVIN;
         document.getElementById('roInput').value = '';
         document.getElementById('vinResult').classList.remove('d-none');
@@ -253,18 +264,27 @@ class VINScanner {
             const existing = await this.api.searchVehicle(identifier);
             
             if (existing) {
+                // If we're editing this same vehicle, don't show duplicate warning
+                if (this.editingVehicleId && existing.id == this.editingVehicleId) {
+                    feedback.textContent = '✅ Editing existing vehicle';
+                    feedback.className = 'form-text text-info';
+                    return;
+                }
+                
                 const lastUpdated = new Date(existing.last_updated).toLocaleDateString();
                 feedback.innerHTML = `⚠️ <strong>DUPLICATE!</strong> Found in system:<br>Customer: ${existing.customer_name}<br>Status: <span class="status-badge status-${existing.status}">${existing.status.replace('-', ' ')}</span><br>Last updated: ${lastUpdated}`;
                 feedback.className = 'form-text text-danger';
                 
-                // Pre-fill existing data
-                document.getElementById('customerSelect').value = existing.customer_id;
-                document.getElementById('statusSelect').value = existing.status;
-                document.getElementById('notesInput').value = existing.notes || '';
-                if (existing.vin) document.getElementById('vinInput').value = existing.vin;
-                if (existing.repair_order) document.getElementById('roInput').value = existing.repair_order;
+                // Only pre-fill if we're not in edit mode
+                if (!this.editingVehicleId) {
+                    document.getElementById('customerSelect').value = existing.customer_id;
+                    document.getElementById('statusSelect').value = existing.status;
+                    document.getElementById('notesInput').value = existing.notes || '';
+                    if (existing.vin) document.getElementById('vinInput').value = existing.vin;
+                    if (existing.repair_order) document.getElementById('roInput').value = existing.repair_order;
+                }
             } else {
-                feedback.textContent = '✅ New entry - ready to save';
+                feedback.textContent = this.editingVehicleId ? '✅ Updating vehicle' : '✅ New entry - ready to save';
                 feedback.className = 'form-text text-success';
             }
         } catch (error) {
@@ -281,6 +301,7 @@ class VINScanner {
         document.getElementById('notesInput').value = '';
         document.getElementById('statusSelect').value = 'pre-scan';
         document.getElementById('customerSelect').value = '';
+        this.editingVehicleId = null; // Clear edit mode
     }
 
     async saveVehicle() {
@@ -596,6 +617,9 @@ async function editVehicle(vehicleId) {
     try {
         const vehicle = await scanner.api.getVehicleById(vehicleId);
         if (vehicle) {
+            // Set edit mode BEFORE populating fields to prevent duplicate check interference
+            scanner.editingVehicleId = vehicleId;
+            
             document.getElementById('customerSelect').value = vehicle.customer_id;
             document.getElementById('vinInput').value = vehicle.vin || '';
             document.getElementById('roInput').value = vehicle.repair_order || '';
@@ -603,6 +627,12 @@ async function editVehicle(vehicleId) {
             document.getElementById('notesInput').value = vehicle.notes || '';
             document.getElementById('vinResult').classList.remove('d-none');
             document.querySelector('#vinResult .card-title').textContent = 'Edit Vehicle';
+            
+            // Set feedback to show edit mode
+            const feedback = document.getElementById('vinFeedback');
+            feedback.textContent = '✅ Editing existing vehicle';
+            feedback.className = 'form-text text-info';
+            
             showScanView();
         }
     } catch (error) {
