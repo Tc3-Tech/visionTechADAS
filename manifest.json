@@ -1,7 +1,7 @@
 {
-  "name": "VIN Scanner",
-  "short_name": "VINScan",
-  "description": "Scan and track vehicle VINs",
+  "name": "Vision Tech ADAS",
+  "short_name": "VisionTech",
+  "description": "ADAS vehicle tracking and management system",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

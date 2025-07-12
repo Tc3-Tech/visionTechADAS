@@ -150,6 +150,78 @@ class VINScannerAPI {
         }
     }
 
+    // Technician API methods
+    async getAllTechnicians() {
+        if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
+            return this.getLocalTechnicians();
+        }
+
+        try {
+            return await this.makeRequest('/technicians');
+        } catch (error) {
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                console.log('Falling back to local storage for technicians');
+                return this.getLocalTechnicians();
+            }
+            throw error;
+        }
+    }
+
+    async addTechnician(name) {
+        const payload = {
+            name: name.trim(),
+            user: this.userId
+        };
+
+        if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
+            return this.saveLocalTechnician(payload);
+        }
+
+        try {
+            const result = await this.makeRequest('/technicians', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            
+            // Also save locally as backup
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                this.saveLocalTechnician(payload);
+            }
+            
+            return result;
+        } catch (error) {
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                console.log('Server unavailable, saving technician locally');
+                return this.saveLocalTechnician(payload);
+            }
+            throw error;
+        }
+    }
+
+    async deleteTechnician(technicianId) {
+        if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
+            return this.deleteLocalTechnician(technicianId);
+        }
+
+        try {
+            const result = await this.makeRequest(`/technicians/${technicianId}`, {
+                method: 'DELETE'
+            });
+            
+            // Also delete locally
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                this.deleteLocalTechnician(technicianId);
+            }
+            
+            return result;
+        } catch (error) {
+            if (CONFIG.ENABLE_OFFLINE_MODE) {
+                return this.deleteLocalTechnician(technicianId);
+            }
+            throw error;
+        }
+    }
+
     // Vehicle API methods (updated for new schema)
     async getAllVehicles(customerId = null, dateStart = null, dateEnd = null) {
         if (!this.isOnline && CONFIG.ENABLE_OFFLINE_MODE) {
@@ -364,10 +436,62 @@ class VINScannerAPI {
         return { message: 'Customer deleted locally' };
     }
 
+    // Local storage fallback methods for technicians
+    getLocalTechnicians() {
+        const technicians = JSON.parse(localStorage.getItem('technicians') || '[]');
+        return technicians.map((t, index) => ({
+            id: t.id || index + 1,
+            name: t.name,
+            date_added: t.dateAdded || new Date().toISOString(),
+            created_by: t.createdBy || 'local'
+        }));
+    }
+
+    saveLocalTechnician(technicianData) {
+        const technicians = JSON.parse(localStorage.getItem('technicians') || '[]');
+        const existingIndex = technicians.findIndex(t => t.name.toLowerCase() === technicianData.name.toLowerCase());
+        
+        if (existingIndex >= 0) {
+            throw new Error('Technician already exists');
+        }
+
+        const technician = {
+            id: Date.now() + Math.random(), // Ensure unique ID
+            name: technicianData.name,
+            dateAdded: new Date().toISOString(),
+            createdBy: technicianData.user || 'local'
+        };
+
+        technicians.push(technician);
+        localStorage.setItem('technicians', JSON.stringify(technicians));
+        
+        return { 
+            id: technician.id,
+            name: technician.name,
+            message: 'Technician saved locally'
+        };
+    }
+
+    deleteLocalTechnician(technicianId) {
+        const technicians = JSON.parse(localStorage.getItem('technicians') || '[]');
+        const vehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
+        
+        // Check if technician has vehicles
+        const technicianVehicles = vehicles.filter(v => v.technicianId == technicianId);
+        if (technicianVehicles.length > 0) {
+            throw new Error('Cannot delete technician with existing vehicles');
+        }
+        
+        const filteredTechnicians = technicians.filter(t => t.id != technicianId);
+        localStorage.setItem('technicians', JSON.stringify(filteredTechnicians));
+        return { message: 'Technician deleted locally' };
+    }
+
     // Local storage fallback methods for vehicles (updated)
     getLocalVehicles(customerId = null, dateStart = null, dateEnd = null) {
         const vehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
         const customers = this.getLocalCustomers();
+        const technicians = this.getLocalTechnicians();
         
         let filteredVehicles = vehicles;
         
@@ -391,12 +515,15 @@ class VINScannerAPI {
         
         return filteredVehicles.map(v => {
             const customer = customers.find(c => c.id == v.customerId);
+            const technician = technicians.find(t => t.id == v.technicianId);
             return {
                 id: v.id || Date.now(),
                 vin: v.vin || null,
                 repair_order: v.repairOrder || v.repair_order || null,
                 customer_id: v.customerId || v.customer_id,
                 customer_name: customer ? customer.name : 'Unknown Customer',
+                technician_id: v.technicianId || v.technician_id || null,
+                technician_name: technician ? technician.name : null,
                 status: v.status,
                 notes: v.notes || '',
                 date_added: v.dateAdded || v.date_added || new Date().toISOString(),
@@ -432,6 +559,7 @@ class VINScannerAPI {
             vin: vehicleData.vin ? vehicleData.vin.toUpperCase() : null,
             repairOrder: vehicleData.repair_order || null,
             customerId: vehicleData.customer_id,
+            technicianId: vehicleData.technician_id || null,
             status: vehicleData.status,
             notes: vehicleData.notes || '',
             lastUpdated: new Date().toISOString(),
@@ -515,6 +643,16 @@ class VINScannerAPI {
             }
         }
         
+        // Sync technicians second
+        const localTechnicians = JSON.parse(localStorage.getItem('technicians') || '[]');
+        for (const technician of localTechnicians) {
+            try {
+                await this.addTechnician(technician.name);
+            } catch (error) {
+                console.error('Failed to sync technician:', technician.name, error);
+            }
+        }
+        
         // Then sync vehicles
         const localVehicles = JSON.parse(localStorage.getItem('vehicles') || '[]');
         for (const vehicle of localVehicles) {
@@ -523,6 +661,7 @@ class VINScannerAPI {
                     vin: vehicle.vin,
                     repair_order: vehicle.repairOrder,
                     customer_id: vehicle.customerId,
+                    technician_id: vehicle.technicianId,
                     status: vehicle.status,
                     notes: vehicle.notes
                 });
